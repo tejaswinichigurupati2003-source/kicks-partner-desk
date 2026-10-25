@@ -176,7 +176,8 @@ function whatIf(ids: string[], text: string, ctx: AssistantContext, pending: Pen
   if (!id || !app) return { lines: ["Which applicant? Please include the application number, for example APP-012."] };
   const parsed = parseChange(text, app);
   const change: Change = { ...(pending && pending.id === id ? pending.change : {}), ...parsed.change };
-  const assumed = [...new Set([...(pending && pending.id === id ? pending.assumed : []), ...parsed.assumed])];
+  const carried = pending && pending.id === id ? pending.assumed.filter((x) => !(parsed.change.space && x.startsWith("rented"))) : [];
+  const assumed = [...new Set([...carried, ...parsed.assumed])];
   if (!hasFields(change))
     return { lines: [`I couldn't tell what changed for ${id}. Try: "${id} found a ground-floor shop, 450 sq ft, rented" or "${id} can now invest 30 lakh".`] };
 
@@ -197,10 +198,12 @@ function whatIf(ids: string[], text: string, ctx: AssistantContext, pending: Pen
     .join(", ");
   lines.push(`If ${id} changes: ${changedWords}.`);
   if (assumed.length) lines.push(`I assumed: ${assumed.join("; ")}.`);
-  if (rows.length === 0 || (rows.length === 1 && rows[0].was === rows[0].now)) lines.push("Nobody's result changes.");
+  if (d1.score !== null && d2.score !== null && d1.score !== d2.score) lines.push(`Score: ${d1.score} → ${d2.score}.`);
+  const unchanged = rows.length === 0 || (rows.length === 1 && rows[0].was === rows[0].now);
+  lines.push("", "Because:");
+  for (const r of d2.reasons.slice(0, 3)) lines.push(`- ${r}`);
+  if (unchanged) lines.push("", "Nobody's result changes.");
   else {
-    lines.push("", "Because:");
-    for (const r of d2.reasons.slice(0, 3)) lines.push(`- ${r}`);
     const others = rows.filter((r) => r.id !== id);
     if (others.length) {
       lines.push("", `Also affected (${others.length}):`);
