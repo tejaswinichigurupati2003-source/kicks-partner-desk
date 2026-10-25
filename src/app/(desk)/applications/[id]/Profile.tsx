@@ -77,6 +77,11 @@ export function ApplicantProfile({ id }: { id: string }) {
             <ScoreTag score={d.score} />
           </div>
         </div>
+        {ws.overrides[id] && !d.changedByTeam && (
+          <p role="alert" className="mt-4 rounded-md border-2 border-danger bg-[#ffd9d3] p-3 font-semibold text-danger">
+            ! The team's change to {STATUS_LABEL[ws.overrides[id].status]} can't be used. It would break one store per pin code or the openings in this area. The rules decide for now.
+          </p>
+        )}
         {d.changedByTeam && (
           <p className="mt-4 rounded-md border-2 border-ink bg-lime p-3 font-semibold">
             The team changed this decision to {STATUS_LABEL[d.changedByTeam.status]}. Reason: {d.changedByTeam.reason}
