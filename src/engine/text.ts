@@ -1,0 +1,69 @@
+import type { Application } from "./types";
+
+export const INSTRUCTION_PATTERN =
+  /(ignore|disregard|forget|override|bypass)\b.{0,40}\b(rules?|instructions?|polic(y|ies)|previous|above|system|prompt)|\b(approve|accept|select|shortlist|prioriti[sz]e)\s+(me|this|my)\b|\bsystem prompt\b|\byou (must|should|have to) (approve|accept)|\bscore me\b|\bgive me (a )?(10|100|top|full)|\bact as\b|\bpretend\b/i;
+
+export function hasInstruction(text: string): boolean {
+  return INSTRUCTION_PATTERN.test(text);
+}
+
+const HIGH =
+  /(foot\s?wear|shoes?|sandals?|chappals?|sneakers?|cloth(es|ing)?|garments?|apparel|fashion|boutique|sarees?|textiles?|bags?|luggage|accessor(y|ies)|general (store|shop)|kirana|provision|grocery|daily needs|supermarket|ಅಂಗಡಿ|ಚಪ್ಪಲಿ|ಬಟ್ಟೆ|दुकान|कपड़|जूते|चप्पल|किराना)/i;
+const OTHER_SHOP =
+  /(shop|store|stall|showroom|outlet|dealer|trader|trading|vendor|retail|mart|bazaar|mobile|electronics|pharmacy|medical|hardware|stationery|gift|cosmetics|jewel|furniture|bakery|salon)/i;
+const NONE = /^(none|nil|na|n\/a|no|not applicable|-|—)?$/i;
+
+export function businessRelevance(a: Pick<Application, "business">): "high" | "medium" | "low" {
+  const t = a.business.trim();
+  if (NONE.test(t)) return "low";
+  if (HIGH.test(t)) return "high";
+  if (OTHER_SHOP.test(t)) return "medium";
+  return "low";
+}
+
+export interface NoteFindings {
+  contradictions: string[];
+  suggestions: string[];
+  instruction: boolean;
+}
+
+/** Looks for things the notes say that clash with the form, or new facts to confirm. Never applies them. */
+export function readNotes(a: Application): NoteFindings {
+  const text = `${a.business}. ${a.notes}`;
+  const notes = a.notes;
+  const contradictions: string[] = [];
+  const suggestions: string[] = [];
+
+  if ((a.experience ?? 0) === 0 && !a.experienceProblem) {
+    const runsShops =
+      /\b(runs?|running|owns?|operates?|managed?|managing)\b[^.]{0,25}\b(\d+|one|two|three|four|five|several|many)\b[^.]{0,15}\b(shops?|stores?|outlets?)\b/i.test(text);
+    const yearsInRetail = /\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\+?\s*(years?|yrs?)\b[^.]{0,30}\b(shop|store|retail|business|experience)/i.test(text);
+    if (runsShops || yearsInRetail) contradictions.push("The notes describe running shops, but the form says 0 years of experience.");
+  }
+  if ((a.experience ?? 0) >= 3 && /\b(no|zero|without)\s+(retail\s+)?experience\b|\bfirst[- ]time\b|\bnever (run|ran|managed)\b/i.test(notes))
+    contradictions.push(`The notes say no retail experience, but the form says ${a.experience} years.`);
+
+  const inv = notes.match(/\b(invest(ment)?|capital|budget|can (put|invest)|have)\b[^.]{0,30}?(\d+(\.\d+)?)\s*(lakhs?|lacs?|l)\b/i);
+  if (inv && a.investment !== null && Math.abs(parseFloat(inv[4]) - a.investment) > 0.01)
+    contradictions.push(`The notes mention ₹${inv[4]} lakh, but the form says ₹${a.investment} lakh.`);
+
+  const months = notes.match(/\b(open|launch|start)\b[^.]{0,25}?\b(\d+)\s*months?\b|\bin\s+(\d+)\s*months?\b/i);
+  const m = months ? parseFloat(months[2] ?? months[3]) : NaN;
+  if (!Number.isNaN(m) && a.target !== null && m !== a.target) contradictions.push(`The notes say ${m} months to open, but the form says ${a.target} months.`);
+
+  if (a.space === "Owned" && /\b(no shop|don'?t have (a )?(shop|space)|not found (a )?(shop|space)|looking for (a )?(shop|space))\b/i.test(notes))
+    contradictions.push("The form says the space is owned, but the notes say no space has been found.");
+
+  const noSpace = a.space === "Not yet identified" || a.space === null;
+  const found = notes.match(/\b(found|got|have|has|secured|signed|finali[sz]ed|booked|leased|taken|identified)\b[^.]{0,30}\b(shop|space|store|unit|premises|showroom|building)\b/i);
+  const negated = /\b(not|no|yet to|haven'?t|have not|looking|searching|trying)\b[^.]{0,20}\b(found|find|got|have)\b/i.test(notes);
+  if (noSpace && found && !negated) {
+    const bits: string[] = ["The notes say a shop space has been found."];
+    const floor = notes.match(/\b(ground|upper|first|second)\s*floor\b|\bmall\b/i);
+    if (floor) bits.push(`Floor mentioned: ${/mall/i.test(floor[0]) ? "mall unit" : /ground/i.test(floor[0]) ? "ground" : "upper"}.`);
+    const sq = notes.match(/(\d{2,5})\s*(sq\.?\s*ft|sqft|square feet)/i);
+    if (sq) bits.push(`Size mentioned: ${sq[1]} sq ft.`);
+    suggestions.push(`${bits.join(" ")} Confirm with the applicant before changing anything.`);
+  }
+  return { contradictions, suggestions, instruction: hasInstruction(notes) || hasInstruction(a.business) };
+}
