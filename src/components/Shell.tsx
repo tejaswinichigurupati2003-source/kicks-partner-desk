@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
+import * as Popover from "@radix-ui/react-popover";
 import { useDesk } from "@/lib/desk";
+import { useAlerts } from "@/lib/alerts";
 import { STATUS_LABEL } from "@/engine/run";
 import type { Status } from "@/engine/types";
 import { Wordmark } from "./ui";
@@ -80,7 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
   const active = (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(href + "/"));
   const decisions = Object.values(result.decisions);
   const count = (s: Status) => decisions.filter((d) => d.status === s).length;
-  const alerts = count("needs_info") + count("conditional");
+  const { alerts, unread, isUnread, markRead } = useAlerts();
 
   const search = (e: FormEvent) => {
     e.preventDefault();
@@ -142,12 +144,46 @@ export function Shell({ children }: { children: ReactNode }) {
                 <path d="M20 20l-4-4" />
               </svg>
             </form>
-            <Link href="/" className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-[#cdd6e6] bg-white text-ink" aria-label={`Needs attention: ${alerts}`}>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M6 9a6 6 0 1 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 20a2 2 0 0 0 4 0" />
-              </svg>
-              {alerts > 0 && <span className="absolute -right-1 -top-1 min-w-[20px] rounded-full bg-[#dc2626] px-1 text-center text-xs font-bold text-white">{alerts}</span>}
-            </Link>
+            <Popover.Root>
+              <Popover.Trigger asChild>
+                <button className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-[#cdd6e6] bg-white text-ink" aria-label={`Notifications: ${unread.length} unread`}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M6 9a6 6 0 1 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 20a2 2 0 0 0 4 0" />
+                  </svg>
+                  {unread.length > 0 && <span className="absolute -right-1 -top-1 min-w-[20px] rounded-full bg-[#dc2626] px-1 text-center text-xs font-bold text-white">{unread.length}</span>}
+                </button>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content align="end" sideOffset={8} className="card z-50 w-[min(92vw,380px)] p-3">
+                  <div className="mb-2 flex items-center justify-between px-1">
+                    <p className="font-bold">Notifications</p>
+                    <button className="min-h-[44px] px-2 text-sm font-semibold text-cobalt disabled:text-muted" disabled={unread.length === 0} onClick={() => markRead(alerts.map((a) => a.key))}>
+                      Mark all as read
+                    </button>
+                  </div>
+                  {alerts.length === 0 ? (
+                    <p className="rounded-xl border border-soft-line p-4 text-sm text-muted">{hasData ? "Nothing needs attention right now." : "Import applications to see what needs attention."}</p>
+                  ) : (
+                    <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
+                      {alerts.map((a) => (
+                        <li key={a.key}>
+                          <Popover.Close asChild>
+                            <Link href={a.href} onClick={() => markRead([a.key])} className={`block rounded-xl border p-3 no-underline tint-${a.tone}`} style={{ color: "inherit" }}>
+                              <span className="flex items-center gap-2 font-bold">
+                                <span className={`dot dot-${a.tone}`} aria-hidden="true" />
+                                {a.title}
+                                {isUnread(a) && <span className="ml-auto rounded-full bg-[#dc2626] px-2 text-[11px] font-bold text-white">New</span>}
+                              </span>
+                              <span className="mt-1 block text-sm text-[#3b4558]">{a.text}</span>
+                            </Link>
+                          </Popover.Close>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover.Root>
             <div className="flex items-center gap-3 border-l border-soft-line pl-4 max-sm:hidden">
               <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e8efff] font-bold" style={{ color: "#12306b" }} aria-hidden="true">
                 E

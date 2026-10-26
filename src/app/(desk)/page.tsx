@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useDesk } from "@/lib/desk";
-import { stagesFor, stageWindow } from "@/engine/plans";
+import { useAlerts } from "@/lib/alerts";
 import { STATUS_LABEL } from "@/engine/run";
 import type { Status } from "@/engine/types";
-import { CONFIG } from "@/engine/config";
 import { Card, EmptyState, ErrorBanner, ImportButton, Loading, PageHeader, StatusStamp } from "@/components/ui";
 
 const ORDER: Status[] = ["approved", "conditional", "needs_info", "waiting", "not_eligible"];
@@ -39,7 +38,8 @@ const px = (lon: number) => ((lon - 73.8) / (78.8 - 73.8)) * (W - 40) + 20;
 const py = (lat: number) => H - 20 - ((lat - 11.4) / (18.6 - 11.4)) * (H - 40);
 
 export default function Overview() {
-  const { ready, hasData, result, ws, now } = useDesk();
+  const { ready, hasData, result, ws } = useDesk();
+  const { alerts } = useAlerts();
   const [city, setCity] = useState<string | null>(null);
 
   const cities = useMemo(() => {
@@ -71,30 +71,6 @@ export default function Overview() {
   const decisions = Object.values(result.decisions);
   const total = decisions.length;
   const count = (s: Status) => decisions.filter((d) => d.status === s).length;
-  const suggestions = decisions.filter((d) => d.suggestions.length > 0);
-  const thin = result.territories.filter((t) => t.territory.slots > t.applicants.length);
-  const overdue: string[] = [];
-  for (const d of decisions) {
-    if (d.status !== "approved" && d.status !== "conditional") continue;
-    const on = ws.approvedOn[d.id];
-    if (!on) continue;
-    const withZero = d.condition.some((c) => c.kind === "space");
-    for (const st of stagesFor(d)) {
-      if ((ws.stages[d.id]?.[st.key] ?? "Not started") !== "Done" && stageWindow(new Date(on), st, withZero && st.n !== 0).end < now) {
-        overdue.push(d.id);
-        break;
-      }
-    }
-  }
-
-  const alerts: { tone: Status; title: string; text: string; href: string }[] = [];
-  if (count("needs_info")) alerts.push({ tone: "needs_info", title: "Needs a reply", text: `${count("needs_info")} application(s) are waiting on an answer from the applicant.`, href: "/applications?status=needs_info" });
-  if (suggestions.length) alerts.push({ tone: "conditional", title: "Facts to confirm", text: `${suggestions.length} application(s) have notes with new facts, such as a shop found.`, href: "/data-review" });
-  if (count("conditional")) alerts.push({ tone: "conditional", title: "Openings on hold", text: `${count("conditional")} approved with a condition. Each opening is held for ${CONFIG.conditionDays} days.`, href: "/applications?status=conditional" });
-  if (overdue.length) alerts.push({ tone: "not_eligible", title: "Overdue stages", text: `${overdue.length} applicant(s) have a stage that should be done by now.`, href: "/onboarding" });
-  if (count("waiting")) alerts.push({ tone: "waiting", title: "Waiting list", text: `${count("waiting")} applicant(s) are waiting for an opening.`, href: "/applications?status=waiting" });
-  if (thin.length) alerts.push({ tone: "approved", title: "Need more applicants", text: `${thin.length} area(s) have fewer applicants than openings: ${thin.map((t) => t.territory.id).join(", ")}.`, href: "/market" });
-
   const picked = cities.find((c) => c.name === city) ?? null;
   const stateColor = (s: string) => (s === "full" ? "#dc2626" : s === "filling" ? "#d97706" : s === "open" ? "#16a34a" : "#9aa3b5");
   const recent = ws.log.slice(0, 6);
@@ -206,7 +182,7 @@ export default function Overview() {
           ) : (
             <ul className="space-y-3">
               {alerts.map((a) => (
-                <li key={a.title}>
+                <li key={a.key}>
                   <Link href={a.href} className={`card-link block rounded-xl border p-3 no-underline tint-${a.tone}`}>
                     <span className="flex items-center gap-2 font-bold">
                       <span className={`dot dot-${a.tone}`} aria-hidden="true" />
