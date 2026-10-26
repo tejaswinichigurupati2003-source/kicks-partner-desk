@@ -169,7 +169,7 @@ export function Assistant() {
                 <Lines lines={m.text.split("\n")} />
               </div>
               {(m.cards ?? []).map((c, j) => (
-                <DiffCardView key={j} card={c} />
+                <DiffCardView key={j} card={c} onApplied={(saved, line) => setMsgs((m) => [...m, { role: "assistant", text: line, cards: [saved] }])} />
               ))}
             </div>
           ),

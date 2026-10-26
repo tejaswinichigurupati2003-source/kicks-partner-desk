@@ -43,7 +43,7 @@ function Line({ l, strong = false }: { l: CardLine; strong?: boolean }) {
 }
 
 /** Shows what a saved change did: the target, everyone else it moved, and an Undo button. */
-export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () => void }) {
+export function DiffCardView({ card, onClose, onApplied }: { card: DiffCard; onClose?: () => void; onApplied?: (saved: DiffCard, text: string) => void }) {
   const desk = useDesk();
   const [state, setState] = useState<"idle" | "busy" | "done" | "failed">(card.undone ? "done" : "idle");
   const [applying, setApplying] = useState<"idle" | "busy" | "done" | "failed">("idle");
@@ -60,6 +60,7 @@ export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () =
       if (j.ok && j.card) {
         setApplying("done");
         await desk.receiveCard(j.card);
+        onApplied?.(j.card, j.text ?? "");
       } else {
         setApplying("failed");
         setApplyError(j.text ?? "Nothing was saved.");
@@ -121,7 +122,7 @@ export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () =
           <button className="btn btn-small" disabled={applying === "busy" || applying === "done"} onClick={apply}>
             {applying === "done" ? "Applied" : applying === "busy" ? "Applying…" : "Apply this change"}
           </button>
-          <span className="text-sm text-muted">{applying === "done" ? "Saved. The new card shows what changed, with Undo." : "Nothing has been saved yet."}</span>
+          <span className="text-sm text-muted">{applying === "done" ? "Saved. The new card below has Undo." : "Nothing has been saved yet."}</span>
           {applying === "failed" && <span className="text-sm font-semibold text-danger">! {applyError}</span>}
         </div>
       )}
