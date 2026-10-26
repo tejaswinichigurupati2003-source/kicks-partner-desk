@@ -34,7 +34,7 @@ export default function ImportPage() {
       const data = (await res.json()) as Reply;
       if (!data.ok) setError(data.error);
       else {
-        desk.importData({ applications: data.applications, territories: data.territories, stores: data.stores, fileName: file.name }, mode);
+        desk.importData({ applications: data.applications, territories: data.territories, stores: data.stores, fileName: file.name, messages: data.report.messages }, mode);
         setReport({ ...data.report, fileName: file.name });
       }
     } catch {

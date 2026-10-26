@@ -24,6 +24,10 @@ Environment variables (all optional):
 | Name | Use |
 |---|---|
 | `STATUS_SECRET` | Signs the private applicant status links. Set a long random string in production. |
+| `OPENROUTER_API_KEY` | Switches on the AI assistant (Google Gemini models only, through OpenRouter). Without it the assistant uses standard wording. |
+| `OPENROUTER_MODEL` | Optional. A model id that starts with `google/`. Default `google/gemini-3.7-flash`. |
+| `AI_ENABLED` | Optional. Set `false` to force standard wording. |
+| `LANGSEARCH_API_KEY` | Switches on live market notes on the Market page (web search). |
 
 ## Data
 

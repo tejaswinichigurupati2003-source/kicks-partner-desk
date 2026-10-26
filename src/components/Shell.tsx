@@ -13,10 +13,12 @@ const NAV = [
   { href: "/import", label: "Import" },
   { href: "/applications", label: "Applications" },
   { href: "/areas", label: "Areas" },
+  { href: "/market", label: "Market" },
+  { href: "/onboarding", label: "Onboarding" },
+  { href: "/data-review", label: "Data review" },
   { href: "/shortlist", label: "Start here" },
   { href: "/messages", label: "Messages" },
   { href: "/insights", label: "Insights" },
-  { href: "/stores", label: "Our stores" },
 ];
 
 function Ticker() {

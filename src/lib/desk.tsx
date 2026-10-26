@@ -26,6 +26,7 @@ interface Workspace {
   stages: Record<string, Record<string, StageStatus>>;
   approvedOn: Record<string, string>;
   log: LogEntry[];
+  report: string[];
 }
 
 const KEY = "kicks-partner-desk-workspace";
@@ -42,6 +43,7 @@ const empty = (): Workspace => ({
   stages: {},
   approvedOn: {},
   log: [],
+  report: [],
 });
 
 interface Desk {
@@ -50,7 +52,7 @@ interface Desk {
   result: RunResult;
   now: Date;
   hasData: boolean;
-  importData: (d: { applications: Application[]; territories: Territory[]; stores: Store[]; fileName: string }, mode: "replace" | "add") => void;
+  importData: (d: { applications: Application[]; territories: Territory[]; stores: Store[]; fileName: string; messages: string[] }, mode: "replace" | "add") => void;
   saveChange: (id: string, change: Change, note: string) => void;
   setOverride: (id: string, status: Status, reason: string) => void;
   clearOverride: (id: string) => void;
@@ -78,7 +80,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw) as Workspace;
         const age = (Date.now() - new Date(parsed.savedAt).getTime()) / 86400000;
-        if (parsed.v === 1 && age <= KEEP_DAYS) setWs({ ...empty(), ...parsed, stores: parsed.stores?.length ? parsed.stores : EXISTING_STORES });
+        if (parsed.v === 1 && age <= KEEP_DAYS) setWs({ ...empty(), ...parsed, report: parsed.report ?? [], stores: parsed.stores?.length ? parsed.stores : EXISTING_STORES });
         else localStorage.removeItem(KEY);
       }
     } catch {
@@ -126,6 +128,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         ...base,
         savedAt: new Date().toISOString(),
         fileName: d.fileName,
+        report: d.messages,
         applications: [...byId.values()],
         territories,
         stores: d.stores.length ? d.stores : EXISTING_STORES,
