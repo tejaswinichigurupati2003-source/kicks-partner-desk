@@ -28,6 +28,8 @@ export interface Reply {
   lines: string[];
   whatIf?: WhatIf;
   pending?: PendingChange | null;
+  /** The standard wording could not answer; the assistant service may try. */
+  needsAi?: { task: "ask" | "parseChange"; id?: string };
 }
 
 const num = (s: string) => parseFloat(s);
@@ -170,11 +172,11 @@ function training(id: string, ctx: AssistantContext): Reply {
   return { lines };
 }
 
-function whatIf(ids: string[], text: string, ctx: AssistantContext, pending: PendingChange | null | undefined): Reply {
+function whatIf(ids: string[], text: string, ctx: AssistantContext, pending: PendingChange | null | undefined, forced?: Change): Reply {
   const id = ids[0] ?? pending?.id;
   const app = ctx.input.applications.find((a) => a.id === id);
   if (!id || !app) return { lines: ["Which applicant? Please include the application number, for example APP-012."] };
-  const parsed = parseChange(text, app);
+  const parsed = forced ? { change: forced, assumed: [] as string[], missing: [] as string[] } : parseChange(text, app);
   const change: Change = { ...(pending && pending.id === id ? pending.change : {}), ...parsed.change };
   const carried = pending && pending.id === id ? pending.assumed.filter((x) => !(parsed.change.space && x.startsWith("rented"))) : [];
   const assumed = [...new Set([...carried, ...parsed.assumed])];
@@ -250,6 +252,11 @@ export function answer(question: string, ctx: AssistantContext, pending?: Pendin
   if (ids.length && isWhatIf) {
     const parsed = parseChange(q, apps.find((a) => a.id === ids[0]));
     if (hasFields(parsed.change)) return whatIf(ids, q, ctx, pending);
+    return {
+      needsAi: { task: "parseChange", id: ids[0] },
+      lines: [`I couldn't tell what changed for ${ids[0]}. Try: "${ids[0]} found a ground-floor shop, 450 sq ft, rented" or "${ids[0]} can now invest 30 lakh".`],
+      pending,
+    };
   }
   if (!ids.length && pending) {
     const parsed = parseChange(q, apps.find((a) => a.id === pending.id));
@@ -292,6 +299,7 @@ export function answer(question: string, ctx: AssistantContext, pending?: Pendin
     return { lines: [`**${apps.length} applications**`, ...counts] };
   }
   return {
+    needsAi: { task: "ask" },
     lines: [
       "I can answer questions about the decisions already made. Try:",
       '- "Why is APP-007 on the waiting list?"',
@@ -304,4 +312,9 @@ export function answer(question: string, ctx: AssistantContext, pending?: Pendin
       '- "APP-012 found a ground-floor shop, 400 sq ft, rented"',
     ],
   };
+}
+
+/** Applies a change that the assistant service read from the team's sentence. */
+export function answerWithChange(id: string, change: Change, ctx: AssistantContext, pending?: PendingChange | null): Reply {
+  return whatIf([id], "", ctx, pending, change);
 }

@@ -102,7 +102,7 @@ export default function ImportPage() {
                   ))}
                 </ul>
               )}
-              <Link href="/applications" className="btn mt-5">
+              <Link href="/board" className="btn mt-5">
                 See the decisions
               </Link>
             </Card>

@@ -9,6 +9,7 @@ import { Assistant } from "./Assistant";
 
 const NAV = [
   { href: "/", label: "Overview" },
+  { href: "/board", label: "Board" },
   { href: "/import", label: "Import" },
   { href: "/applications", label: "Applications" },
   { href: "/areas", label: "Areas" },

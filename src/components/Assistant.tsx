@@ -2,7 +2,9 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import { answer, type PendingChange, type Reply } from "@/engine/assistant";
+import { answer, answerWithChange, type PendingChange, type Reply } from "@/engine/assistant";
+import type { Change } from "@/engine/rerun";
+import { STATUS_LABEL } from "@/engine/run";
 import { useDesk } from "@/lib/desk";
 
 interface Msg {
@@ -53,18 +55,60 @@ export function Assistant() {
   const [pending, setPending] = useState<PendingChange | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
-  const send = (q: string) => {
-    if (!q.trim()) return;
-    const reply = answer(q, { input: { applications: desk.ws.applications, territories: desk.ws.territories, stores: desk.ws.stores, overrides: desk.ws.overrides }, result: desk.result, now: desk.now }, pending);
-    setPending(reply.pending ?? null);
-    setMsgs((m) => [...m, { from: "team", text: q }, { from: "assistant", reply }]);
+  const [busy, setBusy] = useState(false);
+
+  /** Decision facts only: application numbers, statuses and reasons. No names or applicant-written text leave the browser. */
+  const factsFor = (q: string) => {
+    const mentioned = new Set((q.match(/app[-\s]?0*\d+/gi) ?? []).map((m) => parseInt(m.replace(/\D/g, ""), 10)));
+    const all = desk.ws.applications.filter((a) => desk.result.decisions[a.id]);
+    const pick = all.filter((a) => mentioned.has(parseInt(a.id.replace(/\D/g, ""), 10)));
+    const rest = all.filter((a) => !pick.includes(a)).slice(0, Math.max(0, 60 - pick.length));
+    const counts: Record<string, number> = {};
+    for (const d of Object.values(desk.result.decisions)) counts[STATUS_LABEL[d.status]] = (counts[STATUS_LABEL[d.status]] ?? 0) + 1;
+    return {
+      counts,
+      areas: desk.result.territories.map((t) => ({ id: t.territory.id, city: t.territory.city, openings: t.territory.slots, left: t.openingsLeft, waiting: t.waiting.length })),
+      facts: [...pick, ...rest].map((a) => {
+        const d = desk.result.decisions[a.id];
+        return { id: a.id, status: STATUS_LABEL[d.status], verdict: d.verdict, reasons: d.reasons.slice(0, 8), checks: d.checks.slice(0, 8), score: d.score, area: d.territoryId, position: d.position, ahead: d.ahead.slice(0, 30), ask: d.ask ?? null };
+      }),
+    };
+  };
+
+  const send = async (q: string) => {
+    if (!q.trim() || busy) return;
+    const ctx = { input: { applications: desk.ws.applications, territories: desk.ws.territories, stores: desk.ws.stores, overrides: desk.ws.overrides }, result: desk.result, now: desk.now };
+    let reply = answer(q, ctx, pending);
     setText("");
+    setMsgs((m) => [...m, { from: "team", text: q }]);
+    if (reply.needsAi && desk.hasData) {
+      setBusy(true);
+      try {
+        const res = await fetch("/api/assistant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ task: reply.needsAi.task, question: q.slice(0, 600), id: reply.needsAi.id, ...factsFor(q) }),
+        });
+        const data = (await res.json()) as { ok: boolean; answer?: string; changes?: Change; needs_clarification?: string };
+        if (data.ok && reply.needsAi.task === "ask" && data.answer) reply = { lines: data.answer.split("\n") };
+        else if (data.ok && reply.needsAi.task === "parseChange" && reply.needsAi.id) {
+          if (data.changes && Object.keys(data.changes).length) reply = answerWithChange(reply.needsAi.id, data.changes, ctx, pending);
+          else if (data.needs_clarification) reply = { lines: [data.needs_clarification] };
+        }
+      } catch {
+        /* the standard wording stays */
+      } finally {
+        setBusy(false);
+      }
+    }
+    setPending(reply.pending ?? null);
+    setMsgs((m) => [...m, { from: "assistant", reply }]);
     setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
   };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    send(text);
+    void send(text);
   };
 
   const save = (index: number) => {
@@ -103,7 +147,7 @@ export function Assistant() {
                 <p className="text-muted">For example: “Why is APP-007 on the waiting list?” or “APP-012 found a ground-floor shop.”</p>
                 <div className="flex flex-wrap gap-2">
                   {SUGGESTIONS.map((s) => (
-                    <button key={s} className="btn btn-ghost btn-small" onClick={() => send(s)}>
+                    <button key={s} className="btn btn-ghost btn-small" onClick={() => void send(s)}>
                       {s}
                     </button>
                   ))}
@@ -129,6 +173,7 @@ export function Assistant() {
                 </div>
               ),
             )}
+            {busy && <p className="text-muted">Looking at the decisions…</p>}
             <div ref={endRef} />
           </div>
           <form onSubmit={submit} className="flex gap-2 border-t-2 border-ink bg-surface p-3">
