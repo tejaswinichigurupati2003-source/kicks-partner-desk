@@ -8,6 +8,7 @@ const quoteOf = (notes: string, at: number): string => {
   const q = notes.slice(start, endAt < 0 ? notes.length : endAt).replace(/\s+/g, " ").trim();
   return q.length > 110 ? `${q.slice(0, 107)}...` : q;
 };
+const months_ = (n: number) => `${n} month${n === 1 ? "" : "s"}`;
 const suggest = (fields: string, value: string, quote: string) => `Suggested update: ${fields} → ${value} (notes: "${quote}"). Confirm with the applicant first.`;
 
 export const INSTRUCTION_PATTERN =
@@ -62,8 +63,8 @@ export function readNotes(a: Application): NoteFindings {
   const months = notes.match(/\b(open|launch|start)\b[^.]{0,25}?\b(\d+)\s*months?\b|\bin\s+(\d+)\s*months?\b/i);
   const m = months ? parseFloat(months[2] ?? months[3]) : NaN;
   if (!Number.isNaN(m) && a.target !== null && m !== a.target) {
-    contradictions.push(`The notes say ${m} months to open, but the form says ${a.target} months.`);
-    suggestions.push(suggest("target launch", `${m} months`, quoteOf(notes, months?.index ?? 0)));
+    contradictions.push(`The notes say ${months_(m)} to open, but the form says ${months_(a.target)}.`);
+    suggestions.push(suggest("target launch", months_(m), quoteOf(notes, months?.index ?? 0)));
   }
 
   if (a.space === "Owned" && /\b(no shop|don'?t have (a )?(shop|space)|not found (a )?(shop|space)|looking for (a )?(shop|space))\b/i.test(notes))
@@ -106,7 +107,7 @@ export function readText(a: Application, hint?: import("./types").Hint): ReadTex
   const found = readNotes(a);
   const keyword = businessRelevance(a);
   const business = hint && hint.business !== "unknown" ? hint.business : keyword;
-  const contradictions = Array.from(new Set([...found.contradictions, ...(hint?.contradictions ?? []).map(humanise)]));
+  const contradictions = Array.from(new Set([...found.contradictions, ...(hint?.contradictions ?? []).map(humanise).filter((c) => c.trim().split(/\s+/).length >= 5)]));
   // Vague claims from the assistant ("interested", "will send details") are not updates, so only concrete facts found in the notes are suggested.
   const suggestions = Array.from(new Set(found.suggestions));
   return { business, contradictions, suggestions, instruction: found.instruction || !!hint?.instruction, fromAssistant: !!hint && hint.source === "assistant" };

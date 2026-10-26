@@ -200,3 +200,15 @@ describe("names in the message", () => {
     expect(r.text.split(String.fromCharCode(10))).toHaveLength(1);
   });
 });
+
+describe("assistant hints", () => {
+  it("drops one-word contradictions and says 1 month, not 1 months", async () => {
+    const r = await practice();
+    const hints = { "APP-007": { business: "unknown" as const, claims: [], contradictions: ["targetMonths", "experienceYears"], instruction: false, source: "assistant" as const } };
+    const d = run({ applications: r.applications, territories: r.territories, stores: r.stores, hints }).decisions["APP-007"];
+    const text = d.reasonTrail.map((t) => t.detail).join(" | ");
+    expect(text).not.toMatch(/target launch(\s*\||$)/);
+    expect(text).not.toMatch(/\b1 months\b/);
+    expect(text).toMatch(/1 month to open/);
+  });
+});
