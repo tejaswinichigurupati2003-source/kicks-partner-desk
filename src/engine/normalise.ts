@@ -41,7 +41,10 @@ const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
 export function keyOf(row: RawRow, ...names: string[]): Cell {
   const keys = Object.keys(row);
   for (const n of names) {
-    const hit = keys.find((k) => norm(k).startsWith(norm(n)));
+    // A name ending in "=" must match the whole heading, so "Space" never picks up "Space size".
+    const exact = n.endsWith("=");
+    const want = norm(n);
+    const hit = exact ? keys.find((k) => norm(k) === want) : (keys.find((k) => norm(k) === want) ?? keys.find((k) => norm(k).startsWith(want)));
     if (hit !== undefined) return row[hit];
   }
   return undefined;
@@ -98,11 +101,11 @@ export function cleanApplication(row: RawRow, rowNumber?: number): Application {
   const target = parseNumber(keyOf(row, "Target launch", "Target"));
   const lang = readLanguage(s(keyOf(row, "Preferred language", "Language")));
   if (lang.note) cleaned.push(lang.note);
-  const spaceCell = s(keyOf(row, "Space available", "Space avail"));
+  const spaceCell = s(keyOf(row, "Space available", "Space avail", "Space="));
   const space = pick<Space>(spaceCell, ["Owned", "Rented", "Not yet identified"]);
   if (spaceCell && space && space !== spaceCell) cleaned.push(`Space "${spaceCell}" was read as ${space}.`);
   return {
-    id: s(keyOf(row, "Application ID", "ID")),
+    id: s(keyOf(row, "Application ID", "Applicant ID=", "App ID=", "Application No", "Application Number", "Application Ref", "ID=")),
     name: s(keyOf(row, "Applicant name", "Name")),
     city,
     state,
@@ -137,13 +140,13 @@ export function cleanTerritory(row: RawRow): Territory {
   const tier = ([1, 2, 3].includes(tierNum) ? tierNum : (CONFIG.cities[city]?.tier ?? 2)) as Tier;
   const slots = parseNumber(keyOf(row, "Open slots", "Openings", "Slots")).value ?? 0;
   const priority = pick<Priority>(keyOf(row, "Priority"), ["High", "Medium", "Low"]) ?? "Medium";
-  return { id: s(keyOf(row, "Territory ID", "ID")), city, state, pins, tier, slots: Math.max(0, Math.floor(slots)), priority };
+  return { id: s(keyOf(row, "Territory ID", "Area ID=", "Zone ID=", "Region ID=", "Territory No", "ID=")), city, state, pins, tier, slots: Math.max(0, Math.floor(slots)), priority };
 }
 
 export function cleanStore(row: RawRow): Store {
   const year = parseNumber(keyOf(row, "Opened", "Year")).value ?? 0;
   const city = s(keyOf(row, "City"));
-  return { id: s(keyOf(row, "Store ID", "ID")), city: canonicalCity(city) ?? city, pin: cleanPin(keyOf(row, "Pin code", "Pin")), year };
+  return { id: s(keyOf(row, "Store ID", "Outlet ID=", "Shop ID=", "Store No", "ID=")), city: canonicalCity(city) ?? city, pin: cleanPin(keyOf(row, "Pin code", "Pin")), year };
 }
 
 /** The example row that ships in the spreadsheet template. */

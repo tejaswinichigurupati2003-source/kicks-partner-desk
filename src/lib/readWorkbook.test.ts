@@ -84,7 +84,7 @@ describe("reading the workbook", () => {
     const buf = await workbook({ apps: [], skipSheet: "Applications" });
     const res = await readWorkbook(buf, "x.xlsx");
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.error).toMatch(/Applications is missing/);
+    if (!res.ok) expect(res.error).toMatch(/find the applications/);
   });
   it("rejects files that are not real .xlsx files", async () => {
     expect((await readWorkbook(Buffer.from("hello"), "x.xlsx")).ok).toBe(false);

@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { CONFIG, EXISTING_STORES } from "@/engine/config";
-import { cleanApplication, cleanStore, cleanTerritory, isTemplateExample, type Cell, type RawRow } from "@/engine/normalise";
+import { cleanApplication, cleanStore, cleanTerritory, isTemplateExample, keyOf, type Cell, type RawRow } from "@/engine/normalise";
 import type { Application, Store, Territory } from "@/engine/types";
 import type { DataHealth } from "./workspace";
 
@@ -44,14 +44,22 @@ interface SheetRead {
   rows: { row: number; raw: RawRow }[];
 }
 
-function sheetRows(ws: ExcelJS.Worksheet, marker: string): SheetRead | null {
+const squash = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+type Marker = (heading: string) => boolean;
+/** Headings that mark the ID column, in the wording people actually use. */
+const IS_APP_ID: Marker = (h) => /^(application|applicant|app)(id|no|num|number|ref|code)$/.test(squash(h));
+const IS_TER_ID: Marker = (h) => /^(territory|territories|area|zone|region)(id|no|num|number|code)$/.test(squash(h));
+const IS_STORE_ID: Marker = (h) => /^(store|outlet|shop)(id|no|num|number|code)$/.test(squash(h));
+const IS_BARE_ID: Marker = (h) => /^(id|no|sno|srno|ref)$/.test(squash(h));
+
+function sheetRows(ws: ExcelJS.Worksheet, isMarker: Marker): SheetRead | null {
   let headerRow = -1;
-  const limit = Math.min(ws.rowCount, 30);
+  const limit = Math.min(ws.rowCount, 60);
   for (let r = 1; r <= limit; r++) {
     let hit = false;
     ws.getRow(r).eachCell((cell) => {
       const v = plain(cell.value);
-      if (typeof v === "string" && v.trim().toLowerCase() === marker.toLowerCase()) hit = true;
+      if (typeof v === "string" && isMarker(v.trim())) hit = true;
     });
     if (hit) {
       headerRow = r;
@@ -83,8 +91,16 @@ function isTemplateTerritory(t: Territory): boolean {
   return t.id === "TER-01" && t.city === "Mysuru" && t.pins.join(",") === "570001,570002,570008" && t.slots === 3 && t.priority === "High";
 }
 
-function findSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | undefined {
-  return wb.worksheets.find((w) => w.name.trim().toLowerCase() === name.toLowerCase());
+/** Finds a sheet by its name (several spellings), or failing that by the ID heading inside it. */
+function findSheet(wb: ExcelJS.Workbook, names: string[], isMarker: Marker, taken: ExcelJS.Worksheet[]): { ws: ExcelJS.Worksheet; read: SheetRead } | undefined {
+  const free = wb.worksheets.filter((w) => !taken.includes(w));
+  const byName = free.filter((w) => names.includes(squash(w.name)));
+  const byContent = free.filter((w) => !byName.includes(w));
+  for (const ws of [...byName, ...byContent]) {
+    const read = sheetRows(ws, isMarker);
+    if (read) return { ws, read };
+  }
+  return undefined;
 }
 
 export async function readWorkbook(buffer: Buffer, fileName: string): Promise<ReadResult | ReadError> {
@@ -103,16 +119,18 @@ export async function readWorkbook(buffer: Buffer, fileName: string): Promise<Re
     return { ok: false, error: "We couldn't read this file. Please check that it opens in Excel, then try again." };
   }
 
-  const appSheet = findSheet(wb, "Applications");
-  const terSheet = findSheet(wb, "Territories");
-  const storeSheet = findSheet(wb, "Existing stores");
-  const missing = [!appSheet && "Applications", !terSheet && "Territories"].filter(Boolean) as string[];
-  if (missing.length) return { ok: false, error: `The sheet ${missing.join(" and ")} is missing. The file needs sheets named Applications, Territories and Existing stores.` };
-
-  const appRead = sheetRows(appSheet!, "Application ID");
-  if (!appRead) return { ok: false, error: 'We couldn\'t find the heading "Application ID" on the Applications sheet.' };
-  const terRead = sheetRows(terSheet!, "Territory ID");
-  if (!terRead) return { ok: false, error: 'We couldn\'t find the heading "Territory ID" on the Territories sheet.' };
+  const taken: ExcelJS.Worksheet[] = [];
+  const appNames = ["applications", "application", "applicants", "applicant"];
+  const appFound = findSheet(wb, appNames, IS_APP_ID, taken) ?? findSheet(wb, appNames, IS_BARE_ID, taken);
+  if (appFound) taken.push(appFound.ws);
+  const terFound = findSheet(wb, ["territories", "territory", "areas", "area", "zones", "regions"], IS_TER_ID, taken);
+  if (terFound) taken.push(terFound.ws);
+  const storeFound = findSheet(wb, ["existingstores", "stores", "store", "outlets", "ourstores"], IS_STORE_ID, taken);
+  const storeSheet = storeFound?.ws;
+  if (!appFound) return { ok: false, error: 'We couldn\'t find the applications. Please add a sheet called Applications with a heading such as "Application ID" above the rows.' };
+  if (!terFound) return { ok: false, error: 'We couldn\'t find the Territories sheet. Please add a sheet called Territories with a heading such as "Territory ID", the pin codes each area covers and its open slots. The template on the Import page shows the layout.' };
+  const appRead = appFound.read;
+  const terRead = terFound.read;
   if (appRead.rows.length > CONFIG.maxRows) return { ok: false, error: `The Applications sheet has more than ${CONFIG.maxRows} rows. Please split it into smaller files.` };
 
   const errors: DataHealth["errors"] = [];
@@ -140,8 +158,10 @@ export async function readWorkbook(buffer: Buffer, fileName: string): Promise<Re
     if (a.investmentProblem && a.investmentProblem !== "blank") errors.push({ sheet: "Applications", row, text: `${a.id}: investment is ${a.investmentProblem}.` });
     if (a.experienceProblem && a.experienceProblem !== "blank") errors.push({ sheet: "Applications", row, text: `${a.id}: retail experience is ${a.experienceProblem}.` });
     if (a.pin && !/^\d{6}$/.test(a.pin)) errors.push({ sheet: "Applications", row, text: `${a.id}: pin code "${a.pin}" is not 6 digits.` });
-    if (a.space === null && String(raw["Space available"] ?? "").trim() !== "") errors.push({ sheet: "Applications", row, text: `${a.id}: space "${String(raw["Space available"])}" is not Owned, Rented or Not yet identified.` });
-    if (a.floor === null && String(raw["Floor"] ?? "").trim() !== "") errors.push({ sheet: "Applications", row, text: `${a.id}: floor "${String(raw["Floor"])}" is not Ground, Upper, Mall unit or Not known.` });
+    const spaceRaw = String(keyOf(raw, "Space available", "Space avail", "Space=") ?? "").trim();
+    const floorRaw = String(keyOf(raw, "Floor") ?? "").trim();
+    if (a.space === null && spaceRaw !== "") errors.push({ sheet: "Applications", row, text: `${a.id}: space "${spaceRaw}" is not Owned, Rented or Not yet identified.` });
+    if (a.floor === null && floorRaw !== "") errors.push({ sheet: "Applications", row, text: `${a.id}: floor "${floorRaw}" is not Ground, Upper, Mall unit or Not known.` });
     for (const c of a.cleaned ?? []) changes.push({ row, id: a.id, text: c });
     applications.push(a);
   }
@@ -180,13 +200,14 @@ export async function readWorkbook(buffer: Buffer, fileName: string): Promise<Re
       if (owner && owner !== t.id) errors.push({ sheet: "Territories", row, text: `Pin code ${p} is listed in both ${owner} and ${t.id}. ${owner} is used.` });
       else pinOwner.set(p, t.id);
     }
-    if (String(raw["Open slots"] ?? "").trim() !== "" && !/^\d+$/.test(String(raw["Open slots"]).trim())) errors.push({ sheet: "Territories", row, text: `${t.id}: open slots "${String(raw["Open slots"])}" was read as ${t.slots}.` });
+    const slotsRaw = String(keyOf(raw, "Open slots", "Openings", "Slots") ?? "").trim();
+    if (slotsRaw !== "" && !/^\d+$/.test(slotsRaw)) errors.push({ sheet: "Territories", row, text: `${t.id}: open slots "${slotsRaw}" was read as ${t.slots}.` });
     territories.push(t);
   }
 
   let stores: Store[] = [];
   if (storeSheet) {
-    const storeRead = sheetRows(storeSheet, "Store ID");
+    const storeRead = storeFound?.read;
     if (storeRead) {
       for (const { row, raw } of storeRead.rows) {
         const s = cleanStore(raw);
