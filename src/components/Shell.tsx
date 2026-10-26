@@ -26,6 +26,7 @@ const ICONS: Record<string, string> = {
   stores: "M4 10l1-5h14l1 5M5 10v9h14v-9M9 19v-5h6v5",
   assumptions: "M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M14 4v4M8 10v4M16 16v4",
   audit: "M7 4h10v16H7zM10 8h4M10 12h4M10 16h2",
+  runs: "M12 8v5l3 2M3 12a9 9 0 1 0 3-6.7M3 4v5h5",
 };
 
 function Icon({ name }: { name: string }) {
@@ -52,6 +53,7 @@ const WORK = [
   { href: "/insights", label: "Insights", icon: "insights" },
   { href: "/assumptions", label: "Assumptions", icon: "assumptions" },
   { href: "/audit", label: "Audit log", icon: "audit" },
+  { href: "/runs", label: "Run history", icon: "runs" },
   { href: "/stores", label: "Our stores", icon: "stores" },
 ];
 const STATUSES: Status[] = ["approved", "conditional", "redirected", "waiting", "needs_info", "not_in_plan", "not_eligible", "withdrawn"];
@@ -190,7 +192,7 @@ export function Shell({ children }: { children: ReactNode }) {
                     <button
                       className="btn btn-ghost btn-small"
                       onClick={() => {
-                        if (window.confirm("Start a new, empty run in this browser? The current one stays available to anyone who has its link.")) void newWorkspace();
+                        if (window.confirm("Start a new, empty run in this browser? The current one is not deleted: it stays in Run history for 7 days.")) void newWorkspace();
                       }}
                     >
                       Start a new run
@@ -200,7 +202,15 @@ export function Shell({ children }: { children: ReactNode }) {
                     Your name (shown in the audit log)
                   </label>
                   <input id="actor-name" className="field" defaultValue={actor === "Team member" ? "" : actor} placeholder="Team member" onBlur={(e) => setActor(e.target.value)} />
-                  <p className="mt-3 text-xs text-muted">Runs are deleted after 7 days without changes.</p>
+                  <p className="mt-3 text-xs text-muted">
+                    Earlier runs are kept, not replaced.{" "}
+                    <Popover.Close asChild>
+                      <Link href="/runs" className="font-semibold text-cobalt">
+                        See run history
+                      </Link>
+                    </Popover.Close>
+                    . A run is deleted after 7 days without changes.
+                  </p>
                 </Popover.Content>
               </Popover.Portal>
             </Popover.Root>

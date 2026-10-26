@@ -290,6 +290,36 @@ export async function resolveToken(token: string): Promise<{ runId: string; appl
   return rows[0] ? { runId: rows[0].run_id as string, applicationId: rows[0].application_id as string } : null;
 }
 
+export interface RunSummary {
+  id: string;
+  fileName: string | null;
+  applications: number;
+  counts: Record<string, number>;
+  createdAt: string;
+  updatedAt: string;
+  lastChange: string | null;
+  expiresAt: string;
+}
+
+/** Every run still inside its 7 days, newest activity first, with a one-line picture of each. */
+export async function listRuns(limit = 50): Promise<RunSummary[]> {
+  await ensureSchema();
+  const rows = await q()`SELECT r.id, r.file_name, r.created_at, r.updated_at, jsonb_array_length(r.data->'applications') AS apps,
+      (SELECT summary FROM decision_events e WHERE e.run_id = r.id AND e.application_id IS NULL ORDER BY e.at DESC, e.id DESC LIMIT 1) AS last_change,
+      COALESCE((SELECT jsonb_object_agg(status, n) FROM (SELECT status, count(*) AS n FROM decisions d WHERE d.run_id = r.id GROUP BY status) t), '{}'::jsonb) AS counts
+    FROM runs r WHERE r.updated_at > now() - interval '7 days' ORDER BY r.updated_at DESC LIMIT ${limit}`;
+  return rows.map((r) => ({
+    id: r.id as string,
+    fileName: (r.file_name as string | null) ?? null,
+    applications: Number(r.apps ?? 0),
+    counts: (r.counts ?? {}) as Record<string, number>,
+    createdAt: new Date(r.created_at as string).toISOString(),
+    updatedAt: new Date(r.updated_at as string).toISOString(),
+    lastChange: (r.last_change as string | null) ?? null,
+    expiresAt: new Date(new Date(r.updated_at as string).getTime() + 7 * 86400_000).toISOString(),
+  }));
+}
+
 export async function purgeOld(): Promise<number> {
   await ensureSchema();
   const rows = await q()`DELETE FROM runs WHERE updated_at < now() - interval '7 days' RETURNING id`;
