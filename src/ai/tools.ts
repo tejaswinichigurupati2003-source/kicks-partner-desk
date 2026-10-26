@@ -2,6 +2,7 @@ import { DEFAULT_ASSUMPTIONS, mergeAssumptions } from "@/engine/config";
 import { applyChange, scenariosFor, type Change } from "@/engine/rerun";
 import { HOLDS_OPENING, run, STATUS_LABEL } from "@/engine/run";
 import type { Application, Decision, RunResult } from "@/engine/types";
+import { assumptionLabel } from "@/engine/labels";
 import { buildDiffCard, type DiffCard, type Trigger } from "@/lib/diffcard";
 import { toRunInput, type Workspace } from "@/lib/workspace";
 import type { ToolSpec } from "./openrouter";
@@ -22,6 +23,8 @@ export interface ToolContext {
   persist: (next: Workspace, meta: PersistMeta) => Promise<PersistResult>;
   cards: DiffCard[];
   saved: boolean;
+  /** Set by the server when the person asked a what-if question. Every change then runs as a preview, whatever the model asked for. */
+  forcePreview?: boolean;
 }
 
 /** A context that saves in memory, for tests and for trying the tools without a database. */
@@ -86,7 +89,25 @@ function summariseCard(card: DiffCard | null) {
   return { target: card.target ? line(card.target) : null, knockOnEffects: card.knockOn.map(line) };
 }
 
-async function commit(ctx: ToolContext, next: Workspace, meta: PersistMeta) {
+/** A what-if: runs the change on a copy and builds the card, without saving anything or writing to the audit log. */
+function previewOf(ctx: ToolContext, next: Workspace, meta: PersistMeta, action: Action) {
+  const before = run(toRunInput(ctx.ws));
+  const after = run(toRunInput(next));
+  const names = Object.fromEntries(next.applications.map((a) => [a.id, a.name]));
+  const card = { ...buildDiffCard(before, after, names, meta.targetId ?? null, { trigger: meta.trigger, summary: meta.summary, groupId: null, undoable: false }), preview: true, action };
+  ctx.cards.push(card);
+  return { preview: true, saved: false, note: "Nothing was saved. The screen shows a preview with an Apply button.", ...summariseCard(card) };
+}
+
+interface Action {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+const wantsPreview = (ctx: ToolContext, args: { mode?: string }) => ctx.forcePreview === true || args.mode === "preview";
+
+async function commit(ctx: ToolContext, next: Workspace, meta: PersistMeta, action: Action, args: { mode?: string }) {
+  if (wantsPreview(ctx, args)) return previewOf(ctx, next, meta, { tool: action.tool, args: { ...action.args, mode: "apply" } });
   const res = await ctx.persist(next, meta);
   if (!res.ok) return { error: "conflict", message: "A teammate changed this run at the same moment. Nothing was saved. Ask again to retry." };
   ctx.ws = next;
@@ -100,6 +121,7 @@ const SPACES = ["Owned", "Rented", "Not yet identified"] as const;
 const FLOORS = ["Ground", "Upper", "Mall unit", "Not known"] as const;
 
 export interface UpdateArgs {
+  mode?: "preview" | "apply";
   id: string;
   space?: string;
   size?: number;
@@ -141,25 +163,25 @@ export async function updateApplication(ctx: ToolContext, args: UpdateArgs) {
 
   const next: Workspace = { ...ctx.ws, applications: ctx.ws.applications.map((a) => (a.id === app.id ? applyChange(a, change) : a)) };
   const parts = Object.entries(change).map(([k, v]) => `${k} ${v}`).join(", ");
-  return commit(ctx, next, { trigger: "chat", actor: ctx.actor, summary: `${app.id} updated in chat: ${parts}.`, targetId: app.id });
+  return commit(ctx, next, { trigger: "chat", actor: ctx.actor, summary: `${app.id} updated in chat: ${parts}.`, targetId: app.id }, { tool: "update_application", args: { ...args } }, args);
 }
 
-export async function withdrawApplication(ctx: ToolContext, args: { id: string; reason?: string }) {
+export async function withdrawApplication(ctx: ToolContext, args: { id: string; reason?: string; mode?: string }) {
   const app = findApp(ctx.ws, args.id);
   if (!app) return notFound(args.id);
   if (app.withdrawn) return { already: true, message: `${app.id} is already withdrawn.` };
   const next: Workspace = { ...ctx.ws, applications: ctx.ws.applications.map((a) => (a.id === app.id ? { ...a, withdrawn: true, withdrawnReason: args.reason?.slice(0, 200) } : a)) };
-  return commit(ctx, next, { trigger: "chat", actor: ctx.actor, summary: `${app.id} withdrew${args.reason ? `: ${args.reason.slice(0, 120)}` : ""}.`, targetId: app.id });
+  return commit(ctx, next, { trigger: "chat", actor: ctx.actor, summary: `${app.id} withdrew${args.reason ? `: ${args.reason.slice(0, 120)}` : ""}.`, targetId: app.id }, { tool: "withdraw_application", args: { ...args } }, args);
 }
 
-export async function updateTerritory(ctx: ToolContext, args: { id: string; slots_delta: number }) {
+export async function updateTerritory(ctx: ToolContext, args: { id: string; slots_delta: number; mode?: string }) {
   const t = ctx.ws.territories.find((x) => x.id.toLowerCase() === String(args.id).toLowerCase() || x.id.replace(/\D/g, "") === String(args.id).replace(/\D/g, ""));
   if (!t) return { error: "not_found", message: `No area ${args.id} in this run.` };
   const delta = Math.trunc(Number(args.slots_delta));
   if (!Number.isFinite(delta) || delta === 0 || Math.abs(delta) > 20) return { needs_clarification: "How many openings should be added or removed?" };
   const slots = Math.max(0, t.slots + delta);
   const next: Workspace = { ...ctx.ws, territories: ctx.ws.territories.map((x) => (x.id === t.id ? { ...x, slots } : x)) };
-  return commit(ctx, next, { trigger: "territory", actor: ctx.actor, summary: `${t.id} openings changed from ${t.slots} to ${slots}.` });
+  return commit(ctx, next, { trigger: "territory", actor: ctx.actor, summary: `${t.id} openings changed from ${t.slots} to ${slots}.` }, { tool: "update_territory", args: { ...args } }, args);
 }
 
 function setPath(obj: Record<string, unknown>, path: string[], value: unknown) {
@@ -169,7 +191,7 @@ function setPath(obj: Record<string, unknown>, path: string[], value: unknown) {
 }
 
 /** Changes one assumption by its path, for example "minScoreToAllocate" or "weights.investment". */
-export async function setAssumption(ctx: ToolContext, args: { key: string; value: number | boolean }) {
+export async function setAssumption(ctx: ToolContext, args: { key: string; value: number | boolean; mode?: string }) {
   const path = String(args.key).split(".");
   let ref: unknown = DEFAULT_ASSUMPTIONS;
   for (const k of path) {
@@ -182,7 +204,7 @@ export async function setAssumption(ctx: ToolContext, args: { key: string; value
   const old = path.reduce((o: unknown, k) => (o as Record<string, unknown>)[k], merged);
   setPath(merged, path, args.value);
   const next: Workspace = { ...ctx.ws, assumptions: merged as unknown as Workspace["assumptions"] };
-  return commit(ctx, next, { trigger: "assumption", actor: ctx.actor, summary: `Assumption ${args.key} changed from ${String(old)} to ${String(args.value)}.` });
+  return commit(ctx, next, { trigger: "assumption", actor: ctx.actor, summary: `Assumption change: ${assumptionLabel(args.key)} ${String(old)} → ${String(args.value)}.` }, { tool: "set_assumption", args: { ...args } }, args);
 }
 
 export function getApplication(ctx: ToolContext, args: { id: string }) {
@@ -257,13 +279,13 @@ export async function executeTool(ctx: ToolContext, name: string, args: Record<s
       case "update_application":
         return await updateApplication(ctx, args as unknown as UpdateArgs);
       case "withdraw_application":
-        return await withdrawApplication(ctx, args as { id: string; reason?: string });
+        return await withdrawApplication(ctx, args as { id: string; reason?: string; mode?: string });
       case "rerun_engine":
         return rerunEngine(ctx);
       case "set_assumption":
-        return await setAssumption(ctx, args as { key: string; value: number | boolean });
+        return await setAssumption(ctx, args as { key: string; value: number | boolean; mode?: string });
       case "update_territory":
-        return await updateTerritory(ctx, args as { id: string; slots_delta: number });
+        return await updateTerritory(ctx, args as { id: string; slots_delta: number; mode?: string });
       default:
         return { error: "unknown_tool", message: `There is no tool called ${name}.` };
     }
@@ -272,6 +294,7 @@ export async function executeTool(ctx: ToolContext, name: string, args: Record<s
   }
 }
 
+const modeProp = { type: "string", enum: ["preview", "apply"], description: "preview for any what-if / suppose / what happens if question: nothing is saved and the person sees a preview with an Apply button. apply only when the person told you to make the change. Default apply." };
 const idProp = { type: "string", description: "Application number, for example APP-012" };
 export const TOOL_SPECS: ToolSpec[] = [
   { type: "function", function: { name: "get_application", description: "Facts and the stored decision for one application (no names).", parameters: { type: "object", properties: { id: idProp }, required: ["id"] } } },
@@ -294,13 +317,14 @@ export const TOOL_SPECS: ToolSpec[] = [
           target: { type: "number", description: "Target launch in months" },
           pin: { type: "string", description: "6-digit pin code" },
           language: { type: "string", enum: ["Kannada", "English", "Hindi"] },
+          mode: modeProp,
         },
         required: ["id"],
       },
     },
   },
-  { type: "function", function: { name: "withdraw_application", description: "SAVE that an applicant has withdrawn, and re-run the whole area.", parameters: { type: "object", properties: { id: idProp, reason: { type: "string" } }, required: ["id"] } } },
-  { type: "function", function: { name: "update_territory", description: "SAVE a change to an area's number of openings (for example 'add one opening to TER-03' is slots_delta 1) and re-run.", parameters: { type: "object", properties: { id: { type: "string", description: "Area, for example TER-03" }, slots_delta: { type: "number" } }, required: ["id", "slots_delta"] } } },
-  { type: "function", function: { name: "set_assumption", description: "SAVE a change to one assumption by its path, for example minScoreToAllocate or weights.investment, and re-run everyone.", parameters: { type: "object", properties: { key: { type: "string" }, value: { type: ["number", "boolean"] } }, required: ["key", "value"] } } },
+  { type: "function", function: { name: "withdraw_application", description: "SAVE that an applicant has withdrawn, and re-run the whole area.", parameters: { type: "object", properties: { id: idProp, reason: { type: "string" }, mode: modeProp }, required: ["id"] } } },
+  { type: "function", function: { name: "update_territory", description: "SAVE a change to an area's number of openings (for example 'add one opening to TER-03' is slots_delta 1) and re-run.", parameters: { type: "object", properties: { id: { type: "string", description: "Area, for example TER-03" }, slots_delta: { type: "number" }, mode: modeProp }, required: ["id", "slots_delta"] } } },
+  { type: "function", function: { name: "set_assumption", description: "SAVE a change to one assumption by its path, for example minScoreToAllocate or weights.investment, and re-run everyone.", parameters: { type: "object", properties: { key: { type: "string" }, value: { type: ["number", "boolean"] }, mode: modeProp }, required: ["key", "value"] } } },
   { type: "function", function: { name: "rerun_engine", description: "Re-run the rules on the saved data and return counts, area openings and any problems. Saves nothing.", parameters: { type: "object", properties: {} } } },
 ];

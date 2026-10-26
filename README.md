@@ -40,7 +40,7 @@ Every number the engine uses is an **assumption** (below), shown on the Assumpti
 - A **run** is one upload with an unguessable UUID. `/run/<uuid>` opens it for anyone with the link, with no sign-in. Runs are deleted after 7 days without changes.
 - Saves carry a revision number. A save made from an out-of-date copy is refused and the latest version is loaded, so teammates never overwrite each other silently.
 - Every import, chat update, assumption change and manual override writes `decision_events` (before, after, trigger, actor, time) and can be undone.
-- Tables are only reached through server routes (service connection string), with row-level security switched on and no public access.
+- Tables are reached only through server routes, using a server-side connection string that is never sent to the browser. The Neon owner connection bypasses row-level security, so this README does not rely on it: access control is the server routes, plus the unguessable run link.
 
 ## The rules in short
 
@@ -122,7 +122,7 @@ Starts a run with the practice data on a running copy and prints its `/run/<uuid
 
 ## Judge walkthrough
 
-Open the live site, press **Import → Load practice data**, then open **Ask assistant** (docked panel on desktop, bottom sheet on a phone) and try these six things.
+Open the live site, press **Import → Load practice data**, then open **Ask assistant** (docked panel on desktop, bottom sheet on a phone) and try these seven things.
 
 1. **"Why is APP-005 approved at 32 while APP-003 at 87 is waitlisted?"** — The assistant corrects the premise: APP-005 is *not* approved. Its score is 40.3, below the minimum of 45, and the instruction in its notes was ignored. APP-003 (89.7) is waitlisted because APP-002 (100) won pin 570001 and APP-003 has a space in that pin. A side-by-side comparison of pin availability and score follows.
 2. **"APP-002 has withdrawn"** — Saved at once. APP-002 becomes Withdrawn and APP-003 moves up from the waiting list to win 570001. The diff card shows both, with an **Undo** button. The applicant page and the Audit log update immediately.
@@ -130,6 +130,8 @@ Open the live site, press **Import → Load practice data**, then open **Ask ass
 4. **"Add one opening to TER-03"** (on a fresh run) — APP-012 gets an outcome: Redirected to pin 560011.
 5. **"Why is APP-006 redirected?"** — Kicks already has store ST-06 at pin 570009. TER-02 has free pins 570004 and 570020. 570004 is nearest, so it is offered, and it uses one of the area's two openings.
 6. **"Approve APP-005 anyway"** — Declined politely, with a pointer to **Change this decision**, which asks for a reason and is recorded in the Audit log.
+
+7. **"What happens if we raise the minimum score to 60?"** — A *what-if* is never saved. The reply is one line and the card is labelled **Preview, not saved**, listing every decision that would change (for example APP-012 becoming Not eligible). The minimum score stays at 45 and the Audit log gets no entry. Press **Apply this change** to save it; the saved card then has **Undo** and the change is logged.
 
 Also try: **Assumptions** (change the minimum score or the money tolerance, save, and read the diff card), **Areas** (the pin board), and the applicant status link (`/s/…`) on a phone.
 

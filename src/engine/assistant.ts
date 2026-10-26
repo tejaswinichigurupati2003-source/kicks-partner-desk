@@ -1,7 +1,7 @@
 import { compareApplicants, explainDecision, executeTool, findApp, getApplication, rerunEngine, type ToolContext, type UpdateArgs } from "@/ai/tools";
 import { run, STATUS_LABEL } from "./run";
 import { toRunInput } from "@/lib/workspace";
-import type { DiffCard } from "@/lib/diffcard";
+import { oneLineReply, type DiffCard } from "@/lib/diffcard";
 import type { Application, Status } from "./types";
 
 /** What the chat still needs before it can save a change. */
@@ -67,15 +67,7 @@ function saveReply(ctx: ToolContext, out: unknown, pendingFrom?: { id: string; c
   if (o.needs_clarification) return { text: o.needs_clarification, cards: [], pending: pendingFrom ?? null };
   if (o.error || o.already) return { text: o.message ?? "That did not work. Nothing was saved.", cards: [] };
   const card = ctx.cards[ctx.cards.length - 1] ?? null;
-  const t = card?.target;
-  const text = lines(
-    `**Saved.** ${card?.summary ?? "The change is saved and everyone was re-checked."}`,
-    t && `- **${t.id}:** ${t.was} → ${t.now}. Score ${t.beforeScore ?? "none"} → ${t.afterScore ?? "none"}. Pin ${t.beforePin ?? "none"} → ${t.afterPin ?? "none"}.`,
-    card && card.knockOn.length > 0 && `- Knock-on effects (${card.knockOn.length}): ${card.knockOn.map((l) => `${l.id} ${l.was} → ${l.now}`).join("; ")}.`,
-    card && card.knockOn.length === 0 && "- Nobody else's result changed.",
-    "You can undo this from the card below.",
-  );
-  return { text, cards: card ? [card] : [] };
+  return { text: card ? oneLineReply(card) : "**Saved.** The change is saved and everyone was re-checked.", cards: card ? [card] : [] };
 }
 
 function whyText(ctx: ToolContext, id: string): string {

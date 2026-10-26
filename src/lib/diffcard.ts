@@ -28,6 +28,23 @@ export interface DiffCard {
   knockOn: CardLine[];
   undoable: boolean;
   undone?: boolean;
+  /** A what-if: nothing was saved. The action below saves it when the person confirms. */
+  preview?: boolean;
+  action?: { tool: string; args: Record<string, unknown> };
+}
+
+const statusMoved = (l: CardLine) => l.was !== l.now || l.beforePin !== l.afterPin;
+
+/** How many applicants' decisions this change moved: the target when its status or pin moved, plus the knock-on rows. */
+export function changedCount(card: DiffCard): number {
+  return card.knockOn.length + (card.target && statusMoved(card.target) ? 1 : 0);
+}
+
+/** The one line the chat says when a card is shown. Built from the card, so it can never disagree with it. */
+export function oneLineReply(card: DiffCard): string {
+  const n = changedCount(card);
+  const moved = n === 0 ? "No applicant's decision changed." : `${n} decision${n === 1 ? "" : "s"} ${card.preview ? "would change" : "changed"}.`;
+  return card.preview ? `**Preview only, nothing is saved.** ${card.summary} ${moved} Press "Apply this change" to save it.` : `**Saved.** ${card.summary} ${moved}`;
 }
 
 function line(r: DiffRow): CardLine {

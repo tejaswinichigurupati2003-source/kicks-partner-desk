@@ -107,7 +107,7 @@ function phrase(base: RunResult, after: Decision, id: string): string {
     const pin = after.assignedPin;
     const prev = Object.values(base.decisions).find((x) => x.id !== id && HOLDS_OPENING.includes(x.status) && x.assignedPin === pin);
     const verb = after.status === "redirected" ? "is redirected to" : "wins";
-    return `${verb} ${pin}${prev ? ` from ${prev.id} (${prev.score ?? "no score"})` : ""}`;
+    return `${verb} ${pin}${prev ? ` from ${prev.id} (${prev.score ?? "no score"})` : ""}${after.status === "conditional" ? " with a condition" : ""}`;
   }
   return `${STATUS_LABEL[after.status].toLowerCase()}${after.status === "waiting" && after.position ? `, position ${after.position}` : ""}`;
 }
@@ -119,7 +119,8 @@ export function scenariosFor(input: RunInput, id: string): Scenario[] {
   const app = input.applications.find((a) => a.id === id);
   if (!d || !app || d.status === "withdrawn") return [];
   const tries: { change: string; input: RunInput }[] = [];
-  if (!d.hasSpace) tries.push({ change: "a rented ground-floor shop (500 sq ft) is found", input: withChange(input, id, { space: "Rented", size: 500, floor: "Ground" }) });
+  if (d.status === "redirected" && d.redirectPin) tries.push({ change: `a rented ground-floor space is found in ${d.redirectPin}`, input: withChange(input, id, { space: "Rented", size: 500, floor: "Ground" }) });
+  else if (!d.hasSpace) tries.push({ change: "a rented ground-floor shop (500 sq ft) is found", input: withChange(input, id, { space: "Rented", size: 500, floor: "Ground" }) });
   if (d.setupCost !== null && app.investment !== null) {
     const min = (d.setupCost * base.assumptions.minInvestmentPctOfSetup) / 100;
     if (app.investment < min - 1e-9) tries.push({ change: `+₹${fmt(Math.round((min - app.investment) * 10) / 10)}L investment (to the ₹${fmt(min)}L minimum)`, input: withChange(input, id, { investment: min }) });
@@ -140,6 +141,8 @@ export function scenariosFor(input: RunInput, id: string): Scenario[] {
     const r = run(t.input);
     const nd = r.decisions[id];
     if (!nd) continue;
+    // A change that leaves status, pin and place in line exactly as they are tells the reader nothing.
+    if (nd.status === d.status && nd.assignedPin === d.assignedPin && nd.redirectPin === d.redirectPin && nd.position === d.position && nd.rank === d.rank) continue;
     out.push({ change: t.change, status: nd.status, score: nd.score, text: `If ${t.change} → ${nd.score !== null ? `score ${nd.score} → ` : ""}${phrase(base, nd, id)}` });
   }
   return out;
@@ -160,5 +163,5 @@ export function whatWouldChange(input: RunInput, id: string): string {
   if (sc.length) return sc.map((s) => s.text).join(". ") + ".";
   if (d.status === "approved") return "Nothing needed.";
   if (d.status === "conditional") return d.condition.map((c) => c.text.replace(/ within \d+ days\.?$/, "")).join(" and ") + " to move to Approved to proceed.";
-  return "Waiting for an applicant ahead to drop out, or for more openings in this area.";
+  return "Nothing a single change would alter.";
 }

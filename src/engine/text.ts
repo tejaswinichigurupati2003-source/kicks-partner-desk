@@ -1,4 +1,14 @@
+import { humanise } from "./labels";
 import type { Application } from "./types";
+
+/** The sentence of the notes a suggestion comes from, shortened. */
+const quoteOf = (notes: string, at: number): string => {
+  const start = Math.max(notes.lastIndexOf(".", at) + 1, 0);
+  const endAt = notes.indexOf(".", at);
+  const q = notes.slice(start, endAt < 0 ? notes.length : endAt).replace(/\s+/g, " ").trim();
+  return q.length > 110 ? `${q.slice(0, 107)}...` : q;
+};
+const suggest = (fields: string, value: string, quote: string) => `Suggested update: ${fields} → ${value} (notes: "${quote}"). Confirm with the applicant first.`;
 
 export const INSTRUCTION_PATTERN =
   /(ignore|disregard|forget|override|bypass)\b.{0,40}\b(rules?|instructions?|polic(y|ies)|previous|above|system|prompt)|\b(approve|accept|select|shortlist|prioriti[sz]e)\s+(me|this|my)\b|\bsystem prompt\b|\byou (must|should|have to) (approve|accept)|\bscore me\b|\bgive me (a )?(10|100|top|full)|\bact as\b|\bpretend\b/i;
@@ -44,12 +54,17 @@ export function readNotes(a: Application): NoteFindings {
     contradictions.push(`The notes say no retail experience, but the form says ${a.experience} years.`);
 
   const inv = notes.match(/\b(invest(ment)?|capital|budget|can (put|invest)|have)\b[^.]{0,30}?(\d+(\.\d+)?)\s*(lakhs?|lacs?|l)\b/i);
-  if (inv && a.investment !== null && Math.abs(parseFloat(inv[4]) - a.investment) > 0.01)
+  if (inv && a.investment !== null && Math.abs(parseFloat(inv[4]) - a.investment) > 0.01) {
     contradictions.push(`The notes mention ₹${inv[4]} lakh, but the form says ₹${a.investment} lakh.`);
+    suggestions.push(suggest("investment", `₹${inv[4]} lakh`, quoteOf(notes, inv.index ?? 0)));
+  }
 
   const months = notes.match(/\b(open|launch|start)\b[^.]{0,25}?\b(\d+)\s*months?\b|\bin\s+(\d+)\s*months?\b/i);
   const m = months ? parseFloat(months[2] ?? months[3]) : NaN;
-  if (!Number.isNaN(m) && a.target !== null && m !== a.target) contradictions.push(`The notes say ${m} months to open, but the form says ${a.target} months.`);
+  if (!Number.isNaN(m) && a.target !== null && m !== a.target) {
+    contradictions.push(`The notes say ${m} months to open, but the form says ${a.target} months.`);
+    suggestions.push(suggest("target launch", `${m} months`, quoteOf(notes, months?.index ?? 0)));
+  }
 
   if (a.space === "Owned" && /\b(no shop|don'?t have (a )?(shop|space)|not found (a )?(shop|space)|looking for (a )?(shop|space))\b/i.test(notes))
     contradictions.push("The form says the space is owned, but the notes say no space has been found.");
@@ -58,12 +73,19 @@ export function readNotes(a: Application): NoteFindings {
   const found = notes.match(/\b(found|got|have|has|secured|signed|finali[sz]ed|booked|leased|taken|identified)\b[^.]{0,30}\b(shop|space|store|unit|premises|showroom|building)\b/i);
   const negated = /\b(not|no|yet to|haven'?t|have not|looking|searching|trying)\b[^.]{0,20}\b(found|find|got|have)\b/i.test(notes);
   if (noSpace && found && !negated) {
-    const bits: string[] = ["The notes say a shop space has been found."];
+    const fields = ["space"];
+    const values = ["a shop has been found"];
     const floor = notes.match(/\b(ground|upper|first|second)\s*floor\b|\bmall\b/i);
-    if (floor) bits.push(`Floor mentioned: ${/mall/i.test(floor[0]) ? "mall unit" : /ground/i.test(floor[0]) ? "ground" : "upper"}.`);
+    if (floor) {
+      fields.push("floor");
+      values.push(/mall/i.test(floor[0]) ? "mall unit" : /ground/i.test(floor[0]) ? "ground floor" : "upper floor");
+    }
     const sq = notes.match(/(\d{2,5})\s*(sq\.?\s*ft|sqft|square feet)/i);
-    if (sq) bits.push(`Size mentioned: ${sq[1]} sq ft.`);
-    suggestions.push(`${bits.join(" ")} Confirm with the applicant before changing anything.`);
+    if (sq) {
+      fields.push("size");
+      values.push(`${sq[1]} sq ft`);
+    }
+    suggestions.push(suggest(fields.join(", "), values.join(", "), quoteOf(notes, found.index ?? 0)));
   }
   return { contradictions, suggestions, instruction: hasInstruction(notes) || hasInstruction(a.business) };
 }
@@ -84,7 +106,8 @@ export function readText(a: Application, hint?: import("./types").Hint): ReadTex
   const found = readNotes(a);
   const keyword = businessRelevance(a);
   const business = hint && hint.business !== "unknown" ? hint.business : keyword;
-  const contradictions = Array.from(new Set([...found.contradictions, ...(hint?.contradictions ?? [])]));
-  const suggestions = Array.from(new Set([...found.suggestions, ...(hint?.claims ?? []).map((c) => `${c} Confirm with the applicant before changing anything.`)]));
+  const contradictions = Array.from(new Set([...found.contradictions, ...(hint?.contradictions ?? []).map(humanise)]));
+  // Vague claims from the assistant ("interested", "will send details") are not updates, so only concrete facts found in the notes are suggested.
+  const suggestions = Array.from(new Set(found.suggestions));
   return { business, contradictions, suggestions, instruction: found.instruction || !!hint?.instruction, fromAssistant: !!hint && hint.source === "assistant" };
 }

@@ -233,7 +233,7 @@ function prepare(app: Application, index: number, ctx: Ctx): Prep {
   const text = readText(app, ctx.hints[app.id]);
   if (text.instruction) warns.push({ check: "Notes", result: "warn", detail: "The notes contain instructions that were ignored." });
   for (const c of text.contradictions) warns.push({ check: "Notes", result: "warn", detail: c });
-  for (const s of text.suggestions) pushTrail(trail, "Notes", "info", `Suggested update to confirm: ${s}`);
+  for (const s of text.suggestions) pushTrail(trail, "Notes", "info", s);
 
   for (const w of warns) trail.push(w);
   const parts = scoreParts(app, ctx, tier, territory, 0, warns.length);
@@ -641,6 +641,14 @@ export function run(input: RunInput): RunResult {
   for (const p of preps) {
     const d = decisions[p.app.id];
     if (!d) continue;
+    // The money line is written before the final status is known. Only say approval carries a condition when it does.
+    if (d.status !== "approved" && d.status !== "conditional") {
+      d.reasonTrail = d.reasonTrail.map((t) =>
+        t.check === "Investment" && /approval carries a condition/.test(t.detail)
+          ? { ...t, result: "info" as const, detail: t.detail.replace(/Within the (\d+(?:\.\d+)?)% tolerance, so approval carries a condition: show ₹[\d.,]+ lakh more\./, "Within the $1% tolerance (not the reason for this decision).") }
+          : t,
+      );
+    }
     d.reasons = d.reasonTrail.map((t) => t.detail);
     d.checks = d.reasonTrail.filter((t) => t.result === "warn").map((t) => t.detail);
     d.nextStep = nextStepFor(d.status, {

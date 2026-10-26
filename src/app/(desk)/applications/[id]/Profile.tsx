@@ -313,9 +313,11 @@ export function ApplicantProfile({ id }: { id: string }) {
                 })}
               </ol>
               {d.suggestions.length > 0 && (
-                <p className="mt-4 rounded-xl border border-[#f4d9a0] bg-[#fffaf0] p-3 text-sm">
-                  <strong>Suggested update to confirm:</strong> {d.suggestions.join(" ")} Ask the assistant to save it once confirmed.
-                </p>
+                <ul className="mt-4 space-y-2 rounded-xl border border-[#f4d9a0] bg-[#fffaf0] p-3 text-sm">
+                  {d.suggestions.map((s) => (
+                    <li key={s}>{s}</li>
+                  ))}
+                </ul>
               )}
             </Card>
           </section>
@@ -360,7 +362,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                       ))}
                     </ul>
                   ) : d.improvements.length === 0 ? (
-                    <p>{d.status === "approved" ? "Nothing needed." : "Waiting for an applicant ahead to drop out, or for more openings in this area."}</p>
+                    <p>{d.status === "approved" ? "Nothing needed." : "Nothing a single change would alter."}</p>
                   ) : null}
                   <p className="mt-3 text-xs text-muted">Each line re-scores this applicant with one change and re-runs the whole area. Nothing is guessed.</p>
                 </>

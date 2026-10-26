@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { runChat } from "@/ai/chat";
-import type { PersistMeta, ToolContext } from "@/ai/tools";
+import { serverContext } from "@/lib/chatContext";
 import type { Pending } from "@/engine/assistant";
 import { actorOf } from "@/lib/actor";
 import { allow, clientKey } from "@/lib/rateLimit";
 import { readRunId } from "@/lib/runCookie";
-import { addChat, dbEnabled, listChat, loadRun, saveRun } from "@/lib/runs";
+import { addChat, dbEnabled, listChat, loadRun } from "@/lib/runs";
 import type { DiffCard } from "@/lib/diffcard";
 
 export const runtime = "nodejs";
@@ -51,17 +51,7 @@ export async function POST(req: Request) {
     const lastAssistant = [...history].reverse().find((h) => h.role === "assistant");
     const pending = ((lastAssistant?.cards as StoredCards | null)?.pending ?? null) as Pending | null;
 
-    const ctx: ToolContext = {
-      ws: stored.data,
-      rev: stored.rev,
-      actor: actorOf(req),
-      cards: [],
-      saved: false,
-      persist: async (next, meta: PersistMeta) => {
-        const res = await saveRun(runId, next, ctx.rev, meta);
-        return res.ok ? { ok: true, rev: res.rev, card: res.card } : { ok: false, conflict: true };
-      },
-    };
+    const ctx = serverContext(runId, stored.data, stored.rev, actorOf(req));
     const out = await runChat({ message: parsed.data.message, ctx, history: history.map((h) => ({ role: h.role, content: h.content })), pending });
     await addChat(runId, "user", parsed.data.message);
     await addChat(runId, "assistant", out.text, { cards: out.cards, pending: out.pending ?? null } satisfies StoredCards);

@@ -26,6 +26,10 @@ class Session {
     const res = await this.call("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }) });
     return (await res.json()) as { ok: boolean; reply: { text: string; cards: DiffCard[] }; saved: boolean; ai: boolean };
   }
+  async apply(action: { tool: string; args: Record<string, unknown> }) {
+    const res = await this.call("/api/run/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
+    return (await res.json()) as { ok: boolean; card?: DiffCard; text?: string };
+  }
   async join(id: string) {
     return this.call(`/run/${id}`);
   }
@@ -157,5 +161,63 @@ describe.skipIf(!BASE)("live site: acceptance", () => {
     expect(html).toMatch(/Redirected/);
     expect(html).toMatch(/570004/);
     expect(html).not.toMatch(/APP-005|APP-002|score/i);
+  }, 60_000);
+
+  it("what-if never saves: preview card, nothing in the audit log, then Apply saves with Undo", async () => {
+    const s = new Session();
+    await s.practice();
+    const auditBefore = (await s.events()).events.length;
+    const r = await s.chat("What happens if we raise the minimum score to 60?");
+    expect(r.ok).toBe(true);
+    expect(r.saved).toBe(false);
+    expect(r.reply.cards).toHaveLength(1);
+    const card = r.reply.cards[0];
+    expect(card.preview).toBe(true);
+    expect(card.undoable).toBe(false);
+    expect(card.summary).toMatch(/45 → 60/);
+    expect(r.reply.text.split(String.fromCharCode(10))).toHaveLength(1);
+    expect(r.reply.text).toMatch(/Preview only/);
+    const rows = [card.target, ...card.knockOn].filter(Boolean);
+    expect(rows.some((l) => l!.id === "APP-012" && /Not eligible/.test(l!.now))).toBe(true);
+    const after = await s.data();
+    expect(after.ws.assumptions.minScoreToAllocate ?? 45).toBe(45);
+    expect((await s.events()).events.length).toBe(auditBefore);
+
+    const applied = await s.apply(card.action!);
+    expect(applied.ok).toBe(true);
+    expect(applied.card?.undoable).toBe(true);
+    expect(applied.card?.preview).toBeUndefined();
+    expect((await s.data()).ws.assumptions.minScoreToAllocate).toBe(60);
+    expect((await s.events()).events.some((e) => e.trigger === "assumption")).toBe(true);
+  }, 90_000);
+
+  it("a saved change gets a one-line reply plus the card and an audit entry, and compare works", async () => {
+    const s = new Session();
+    await s.practice();
+    const r = await s.chat("APP-002 has withdrawn");
+    expect(r.saved).toBe(true);
+    expect(r.reply.text.split(String.fromCharCode(10))).toHaveLength(1);
+    expect(r.reply.cards).toHaveLength(1);
+    expect(r.reply.cards[0].undoable).toBe(true);
+    const { result } = await s.data();
+    expect(result.decisions["APP-002"].status).toBe("withdrawn");
+    expect((await s.events()).events.some((e) => e.application_id === null && /APP-002/.test(e.summary))).toBe(true);
+    const c = await s.chat("Compare APP-003 and APP-005");
+    expect(c.reply.text).toMatch(/APP-003/);
+    expect(c.reply.text).toMatch(/APP-005/);
+    expect(c.saved).toBe(false);
+  }, 90_000);
+
+  it("reasons match the final status and suggestions are only concrete facts", async () => {
+    const s = new Session();
+    await s.practice();
+    const { result } = await s.data();
+    const d = result.decisions;
+    expect(d["APP-005"].status).toBe("not_eligible");
+    for (const t of d["APP-005"].reasonTrail) expect(t.detail).not.toMatch(/approval carries a condition/);
+    expect(d["APP-003"].suggestions).toEqual([]);
+    expect(d["APP-012"].suggestions).toHaveLength(1);
+    expect(d["APP-012"].suggestions[0]).toMatch(/^Suggested update: /);
+    for (const dec of Object.values(d)) for (const t of dec.reasonTrail) expect(t.detail).not.toMatch(/targetMonths|experienceYears|investmentLakh/);
   }, 60_000);
 });

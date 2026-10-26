@@ -1,5 +1,7 @@
 import { fallbackChat, type ChatReply, type Pending } from "@/engine/assistant";
 import { aiEnabled, chatCompletion, SYSTEM, type ChatMessage } from "./openrouter";
+import { humanise } from "@/engine/labels";
+import { oneLineReply } from "@/lib/diffcard";
 import { executeTool, TOOL_SPECS, type ToolContext } from "./tools";
 
 export interface HistoryItem {
@@ -35,9 +37,19 @@ async function runWithTools(message: string, ctx: ToolContext, history: HistoryI
   throw new Error("ai_steps");
 }
 
+/** A question about something that has not happened: it is answered with a preview and never saved. */
+export function isHypothetical(message: string): boolean {
+  return /\b(what if|what happens if|what would happen|what will happen|suppose|supposing|imagine|hypothetical(ly)?|say we|if we (raise|lower|change|increase|decrease|set|add|remove|cut|drop|move)|if (we|i) were to)\b/i.test(message) || /\bwould (it|that|this|anyone|anybody|any|the)\b[^.?]*\bchange\b/i.test(message);
+}
+
+/** The reply when cards are shown: one line per card, built from the card itself so it can't disagree with it. */
+export function cardReply(ctx: ToolContext): string | null {
+  if (ctx.cards.length === 0) return null;
+  return ctx.cards.map(oneLineReply).join("\n");
+}
+
 function savedSummary(ctx: ToolContext): string {
-  const card = ctx.cards[ctx.cards.length - 1];
-  return card ? `**Saved.** ${card.summary}` : "**Saved.**";
+  return cardReply(ctx) ?? "**Saved.**";
 }
 
 /**
@@ -46,13 +58,14 @@ function savedSummary(ctx: ToolContext): string {
  */
 export async function runChat(opts: { message: string; ctx: ToolContext; history: HistoryItem[]; pending?: Pending | null }): Promise<ChatReply & { ai: boolean }> {
   const { message, ctx, history, pending } = opts;
+  if (isHypothetical(message)) ctx.forcePreview = true;
   if (aiEnabled()) {
     try {
       const text = await runWithTools(message, ctx, history);
-      return { text, cards: ctx.cards, ai: true };
+      return { text: cardReply(ctx) ?? humanise(text), cards: ctx.cards, ai: true };
     } catch {
       // If something was already saved, report it instead of running the message again.
-      if (ctx.saved) return { text: `${savedSummary(ctx)} I could not finish the explanation, so please check the card below.`, cards: ctx.cards, ai: true };
+      if (ctx.cards.length > 0) return { text: savedSummary(ctx), cards: ctx.cards, ai: true };
     }
   }
   const r = await fallbackChat(message, ctx, pending);

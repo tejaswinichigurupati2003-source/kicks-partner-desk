@@ -261,7 +261,8 @@ describe("runChat", () => {
     const ctx = memoryContext(await practiceWs());
     const r = await runChat({ message: "APP-002 has withdrawn", ctx, history: [{ role: "user", content: "hi" }] });
     expect(r.ai).toBe(true);
-    expect(r.text).toMatch(/APP-003 now holds pin 570001/);
+    expect(r.text).toMatch(/^\*\*Saved\.\*\* APP-002 withdrew/);
+    expect(r.text).not.toContain("\n");
     expect(ctx.saved).toBe(true);
     expect(r.cards).toHaveLength(1);
     expect(call).toBe(2);

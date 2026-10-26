@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { CardLine, DiffCard } from "@/lib/diffcard";
+import { changedCount, type CardLine, type DiffCard } from "@/lib/diffcard";
 import { useDesk } from "@/lib/desk";
 
 function Row({ label, before, after }: { label: string; before: string | number | null; after: string | number | null }) {
@@ -46,6 +46,29 @@ function Line({ l, strong = false }: { l: CardLine; strong?: boolean }) {
 export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () => void }) {
   const desk = useDesk();
   const [state, setState] = useState<"idle" | "busy" | "done" | "failed">(card.undone ? "done" : "idle");
+  const [applying, setApplying] = useState<"idle" | "busy" | "done" | "failed">("idle");
+  const [applyError, setApplyError] = useState("");
+  const moved = changedCount(card);
+
+  async function apply() {
+    if (!card.action) return;
+    setApplying("busy");
+    setApplyError("");
+    try {
+      const res = await fetch("/api/run/apply", { method: "POST", headers: { "Content-Type": "application/json", "x-actor": encodeURIComponent(desk.actor) }, body: JSON.stringify(card.action) });
+      const j = (await res.json()) as { ok: boolean; card?: DiffCard; text?: string };
+      if (j.ok && j.card) {
+        setApplying("done");
+        await desk.receiveCard(j.card);
+      } else {
+        setApplying("failed");
+        setApplyError(j.text ?? "Nothing was saved.");
+      }
+    } catch {
+      setApplying("failed");
+      setApplyError("Nothing was saved. Please try again.");
+    }
+  }
 
   async function undo() {
     if (!card.groupId) return;
@@ -66,7 +89,7 @@ export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () =
     <section className="card p-4" aria-label="What changed">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-muted">Saved</p>
+          <p className="text-xs font-bold uppercase tracking-wider text-muted">{card.preview ? "Preview, not saved" : "Saved"}</p>
           <p className="font-bold">{card.summary}</p>
         </div>
         {onClose && (
@@ -75,10 +98,15 @@ export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () =
           </button>
         )}
       </div>
-      {card.target ? <div className="mt-3"><Line l={card.target} strong /></div> : <p className="mt-3 text-sm text-muted">No applicant&apos;s decision changed.</p>}
+      {card.target && (
+        <div className="mt-3">
+          <Line l={card.target} strong />
+        </div>
+      )}
+      {moved === 0 && <p className="mt-3 text-sm text-muted">No applicant&apos;s decision changed.</p>}
       {card.knockOn.length > 0 && (
         <div className="mt-3">
-          <p className="mb-2 font-bold">Knock-on effects ({card.knockOn.length})</p>
+          <p className="mb-2 font-bold">{card.target ? `Knock-on effects (${card.knockOn.length})` : `Decisions that ${card.preview ? "would change" : "changed"} (${card.knockOn.length})`}</p>
           <ul className="space-y-2">
             {card.knockOn.map((l) => (
               <li key={l.id}>
@@ -86,6 +114,15 @@ export function DiffCardView({ card, onClose }: { card: DiffCard; onClose?: () =
               </li>
             ))}
           </ul>
+        </div>
+      )}
+      {card.preview && card.action && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button className="btn btn-small" disabled={applying === "busy" || applying === "done"} onClick={apply}>
+            {applying === "done" ? "Applied" : applying === "busy" ? "Applying…" : "Apply this change"}
+          </button>
+          <span className="text-sm text-muted">{applying === "done" ? "Saved. The new card shows what changed, with Undo." : "Nothing has been saved yet."}</span>
+          {applying === "failed" && <span className="text-sm font-semibold text-danger">! {applyError}</span>}
         </div>
       )}
       {card.undoable && card.groupId && (
