@@ -73,6 +73,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const loaded = useRef(false);
+  const serverOn = useRef(false);
+  const hadLocal = useRef(false);
 
   useEffect(() => {
     try {
@@ -80,6 +82,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw) as Workspace;
         const age = (Date.now() - new Date(parsed.savedAt).getTime()) / 86400000;
+        if (parsed.v === 1 && age <= KEEP_DAYS) hadLocal.current = true;
         if (parsed.v === 1 && age <= KEEP_DAYS) setWs({ ...empty(), ...parsed, report: parsed.report ?? [], stores: parsed.stores?.length ? parsed.stores : EXISTING_STORES });
         else localStorage.removeItem(KEY);
       }
@@ -89,6 +92,14 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     loaded.current = true;
     setNow(new Date());
     setReady(true);
+    // When saving is available, pick up this browser's saved workspace from the server.
+    fetch("/api/workspace")
+      .then((r) => r.json())
+      .then((j: { ok: boolean; data?: Workspace | null }) => {
+        serverOn.current = !!j.ok;
+        if (j.ok && j.data && j.data.v === 1 && !hadLocal.current) setWs({ ...empty(), ...j.data, report: j.data.report ?? [] });
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -98,6 +109,14 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+  }, [ws, ready]);
+
+  useEffect(() => {
+    if (!ready || !serverOn.current) return;
+    const t = setTimeout(() => {
+      fetch("/api/workspace", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ws) }).catch(() => undefined);
+    }, 1500);
+    return () => clearTimeout(t);
   }, [ws, ready]);
 
   const result = useMemo(() => {

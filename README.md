@@ -27,6 +27,8 @@ Environment variables (all optional):
 | `OPENROUTER_API_KEY` | Switches on the AI assistant (Google Gemini models only, through OpenRouter). Without it the assistant uses standard wording. |
 | `OPENROUTER_MODEL` | Optional. A model id that starts with `google/`. Default `google/gemini-3.7-flash`. |
 | `AI_ENABLED` | Optional. Set `false` to force standard wording. |
+| `DATABASE_URL` | Neon Postgres connection string (pooled). When set, each browser's workspace is also saved on the server for 7 days. |
+| `CRON_SECRET` | Protects the daily clean-up at `/api/cron/purge`. |
 | `LANGSEARCH_API_KEY` | Switches on live market notes on the Market page (web search). |
 
 ## Data
