@@ -248,7 +248,12 @@ export function answer(question: string, ctx: AssistantContext, pending?: Pendin
     };
   }
 
-  const isWhatIf = /\b(what if|suppose|if )|(now|just|has|have|had) (found|got|secured|signed|raised|increased|bought|moved|changed|owns?|rented)|found a|now (has|have|owns?|can)|increased|raised|changed (his|her|their|the)|updated|moved to|\bis now\b/.test(t);
+  const asksQuestion = /^\s*(why|who|how|what|which|when|where|is|are|does|do|did|show|list|tell|explain)\b|\?\s*$/.test(t) && !/\b(what if|suppose)\b/.test(t);
+  const statesNews = /\b(managed to|lease[ds]?|signed|booked|arranged|secured|finali[sz]ed|found|got|bought|moved|changed|updated|raised|increased|now|just|has|have|had|can)\b/.test(t);
+  const isWhatIf =
+    /\b(what if|suppose|if )/.test(t) ||
+    /(now|just|has|have|had) (found|got|secured|signed|raised|increased|bought|moved|changed|owns?|rented)|found a|now (has|have|owns?|can)|increased|raised|changed (his|her|their|the)|updated|moved to|\bis now\b/.test(t) ||
+    (!asksQuestion && statesNews);
   if (ids.length && isWhatIf) {
     const parsed = parseChange(q, apps.find((a) => a.id === ids[0]));
     if (hasFields(parsed.change)) return whatIf(ids, q, ctx, pending);

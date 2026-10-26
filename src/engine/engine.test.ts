@@ -147,6 +147,15 @@ describe("assistant and messages", () => {
     const second = answer("it is 450 sq ft", ctx, first.pending);
     expect(second.whatIf?.missing.length).toBe(0);
   });
+  it("reads a plain statement of news as a what-if", () => {
+    const r = answer("APP-012 managed to lease a ground floor unit of about 450 sqft", ctx);
+    expect(r.whatIf?.id).toBe("APP-012");
+    expect(r.whatIf?.change.size).toBe(450);
+    expect(r.whatIf?.change.floor).toBe("Ground");
+  });
+  it("still treats questions as questions", () => {
+    expect(answer("Why is APP-002 approved?", ctx).whatIf).toBeUndefined();
+  });
   it("declines approve anyway", () => {
     expect(answer("approve APP-002 anyway", ctx).lines.join(" ")).toMatch(/can't skip the rules/);
   });
