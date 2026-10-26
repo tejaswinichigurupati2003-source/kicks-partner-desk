@@ -97,6 +97,21 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setWs({ ...empty(), ...data, report: data.report ?? [], stores: data.stores?.length ? data.stores : EXISTING_STORES });
   }, []);
 
+  /** Saves a first copy so the workspace exists and has a link to share. */
+  const createWorkspace = useCallback(async (initial: Workspace) => {
+    try {
+      const res = await fetch("/api/workspace", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: initial, rev: 0 }) });
+      const k = (await res.json()) as { ok: boolean; id?: string; rev?: number };
+      if (k.ok) {
+        rev.current = k.rev ?? 1;
+        dirty.current = false;
+        setSync((x) => ({ ...x, status: "saved", workspaceId: k.id ?? x.workspaceId }));
+      }
+    } catch {
+      /* the next change will try again */
+    }
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const joined = params.get("joined") === "1";
@@ -131,11 +146,10 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         serverOn.current = true;
         setSync((s) => ({ ...s, status: "saved", workspaceId: j.id ?? null }));
         if (j.data && j.data.v === 1) applyServer(j.data, j.rev ?? 0);
-        else if (hadLocal) dirty.current = true; // the server has nothing yet: save what this browser has
-        if (!j.data && hadLocal) setWs((w) => ({ ...w }));
+        else void createWorkspace(hadLocal ? wsRef.current : empty());
       })
       .catch(() => undefined);
-  }, [applyServer]);
+  }, [applyServer, createWorkspace]);
 
   useEffect(() => {
     if (!ready) return;
@@ -198,10 +212,11 @@ export function DeskProvider({ children }: { children: ReactNode }) {
       dirty.current = false;
       setWs(empty());
       setSync({ status: j.ok ? "saved" : "local", workspaceId: j.id ?? null, note: null });
+      if (j.ok) await createWorkspace(empty());
     } catch {
       /* stay in the current workspace */
     }
-  }, []);
+  }, [createWorkspace]);
 
   const result = useMemo(() => {
     try {
