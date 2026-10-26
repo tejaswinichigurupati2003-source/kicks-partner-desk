@@ -185,3 +185,18 @@ describe("data review and reasons read like people wrote them", () => {
     }
   });
 });
+
+describe("names in the message", () => {
+  it("a full applicant name becomes the application number, so 'Sunita Patil is pulling out' saves the withdrawal and promotes the next person", async () => {
+    const ws = await practiceWs();
+    const sunita = ws.applications.find((a) => a.name === "Sunita Patil");
+    expect(sunita).toBeTruthy();
+    const ctx = memoryContext(ws);
+    const r = await runChat({ message: "Sunita Patil is pulling out", ctx, history: [] });
+    expect(ctx.saved).toBe(true);
+    expect(r.cards).toHaveLength(1);
+    expect(r.cards[0].target?.id).toBe(sunita!.id);
+    expect(r.cards[0].knockOn.some((l) => l.id === "APP-017" && /Approved/.test(l.now))).toBe(true);
+    expect(r.text.split(String.fromCharCode(10))).toHaveLength(1);
+  });
+});

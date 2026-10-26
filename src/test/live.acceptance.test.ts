@@ -220,4 +220,19 @@ describe.skipIf(!BASE)("live site: acceptance", () => {
     expect(d["APP-012"].suggestions[0]).toMatch(/^Suggested update: /);
     for (const dec of Object.values(d)) for (const t of dec.reasonTrail) expect(t.detail).not.toMatch(/targetMonths|experienceYears|investmentLakh/);
   }, 60_000);
+
+  it("a name in the message works: 'Sunita Patil is pulling out' promotes APP-017, one line, card with Undo, audit entry", async () => {
+    const s = new Session();
+    await s.practice();
+    const r = await s.chat("Sunita Patil is pulling out");
+    expect(r.saved).toBe(true);
+    expect(r.reply.text.split(String.fromCharCode(10))).toHaveLength(1);
+    expect(r.reply.cards).toHaveLength(1);
+    expect(r.reply.cards[0].undoable).toBe(true);
+    expect(r.reply.cards[0].knockOn.some((l) => l.id === "APP-017" && /Approved/.test(l.now))).toBe(true);
+    const { result } = await s.data();
+    expect(result.decisions["APP-018"].status).toBe("withdrawn");
+    expect(result.decisions["APP-017"].status).toBe("approved");
+    expect((await s.events()).events.some((e) => e.application_id === null && /APP-018/.test(e.summary))).toBe(true);
+  }, 90_000);
 });

@@ -138,7 +138,7 @@ export async function fallbackChat(message: string, ctx: ToolContext, pending?: 
     return saveReply(ctx, await executeTool(ctx, "update_territory", { id: area.id, slots_delta: delta }));
   }
 
-  if (ids.length && /\b(withdrawn|withdraw|withdraws|withdrew|withdrawing|pulled out|dropped out|no longer interested|backed out)\b/.test(t)) {
+  if (ids.length && /\b(withdrawn|withdraw|withdraws|withdrew|withdrawing|pulled out|pulling out|pulls out|dropped out|dropping out|drops out|no longer interested|backed out)\b/.test(t)) {
     return saveReply(ctx, await executeTool(ctx, "withdraw_application", { id: ids[0] }));
   }
 

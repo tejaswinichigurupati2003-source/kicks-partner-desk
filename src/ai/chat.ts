@@ -37,6 +37,19 @@ async function runWithTools(message: string, ctx: ToolContext, history: HistoryI
   throw new Error("ai_steps");
 }
 
+/** Replaces a full applicant name in the message with the application number, so the assistant (which never sees names) can act on it. */
+export function resolveNames(message: string, apps: { id: string; name: string }[]): string {
+  let out = message;
+  const names = apps.filter((a) => a.name.trim().split(" ").length >= 2).sort((a, b) => b.name.length - a.name.length);
+  for (const a of names) {
+    const same = names.filter((x) => x.name.trim().toLowerCase() === a.name.trim().toLowerCase());
+    if (same.length > 1) continue;
+    const escaped = a.name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ +/g, " +");
+    out = out.replace(new RegExp(escaped, "gi"), a.id);
+  }
+  return out;
+}
+
 /** A question about something that has not happened: it is answered with a preview and never saved. */
 export function isHypothetical(message: string): boolean {
   return /\b(what if|what happens if|what would happen|what will happen|suppose|supposing|imagine|hypothetical(ly)?|say we|if we (raise|lower|change|increase|decrease|set|add|remove|cut|drop|move)|if (we|i) were to)\b/i.test(message) || /\bwould (it|that|this|anyone|anybody|any|the)\b[^.?]*\bchange\b/i.test(message);
@@ -57,7 +70,8 @@ function savedSummary(ctx: ToolContext): string {
  * Whatever is saved goes through the same save path, and the diff cards come back with the answer.
  */
 export async function runChat(opts: { message: string; ctx: ToolContext; history: HistoryItem[]; pending?: Pending | null }): Promise<ChatReply & { ai: boolean }> {
-  const { message, ctx, history, pending } = opts;
+  const { ctx, history, pending } = opts;
+  const message = resolveNames(opts.message, ctx.ws.applications);
   if (isHypothetical(message)) ctx.forcePreview = true;
   if (aiEnabled()) {
     try {
