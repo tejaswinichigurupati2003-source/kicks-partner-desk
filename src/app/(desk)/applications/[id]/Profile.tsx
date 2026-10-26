@@ -61,7 +61,7 @@ export function ApplicantProfile({ id }: { id: string }) {
         <Link href="/applications">← All applications</Link>
       </p>
 
-      <Card className="mb-8 p-6" selected={d.status === "approved"}>
+      <Card className={`mb-8 p-6 tint-${d.status}`}>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-0">
             <p className="mono text-sm text-muted">
@@ -102,7 +102,7 @@ export function ApplicantProfile({ id }: { id: string }) {
               </ul>
               {d.checks.length > 0 && (
                 <>
-                  <h3 className="font-display-up mt-5 text-[22px]">Things to check</h3>
+                  <h3 className="font-display-up mt-5 text-[16px]">Things to check</h3>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
                     {d.checks.map((c, i) => (
                       <li key={i}>{c}</li>
@@ -112,7 +112,7 @@ export function ApplicantProfile({ id }: { id: string }) {
               )}
               {d.suggestions.length > 0 && (
                 <>
-                  <h3 className="font-display-up mt-5 text-[22px]">Suggested update to confirm</h3>
+                  <h3 className="font-display-up mt-5 text-[16px]">Suggested update to confirm</h3>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
                     {d.suggestions.map((c, i) => (
                       <li key={i}>{c}</li>
@@ -192,7 +192,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                 {training.basics.length > 0 && <p className="mt-2">Starts with: {training.basics.join(" and ")}.</p>}
                 {training.focus.length > 0 && (
                   <>
-                    <h3 className="font-display-up mt-4 text-[22px]">Extra focus for this partner</h3>
+                    <h3 className="font-display-up mt-4 text-[16px]">Extra focus for this partner</h3>
                     <ul className="mt-1 list-disc space-y-1 pl-5">
                       {training.focus.map((f) => (
                         <li key={f.module}>
@@ -202,7 +202,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                     </ul>
                   </>
                 )}
-                <h3 className="font-display-up mt-4 text-[22px]">Kicks modules</h3>
+                <h3 className="font-display-up mt-4 text-[16px]">Kicks modules</h3>
                 <p className="text-sm text-muted">{training.modules.join(" · ")}</p>
               </Card>
             </section>
@@ -274,7 +274,7 @@ export function ApplicantProfile({ id }: { id: string }) {
             <section>
               <SectionTitle>Months to earn back the investment</SectionTitle>
               <Card className="p-5">
-                <p className="font-display-up text-[64px] leading-none" style={{ color: "var(--orange)" }}>
+                <p className="big-num text-[64px] leading-none" style={{ color: "var(--orange)" }}>
                   {d.earnBack.months}
                   <span className="ml-2 text-[24px] text-ink">months</span>
                 </p>
@@ -340,7 +340,7 @@ export function ApplicantProfile({ id }: { id: string }) {
                   <Dialog.Portal>
                     <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
                     <Dialog.Content className="card fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 p-6" aria-describedby="chg-desc">
-                      <Dialog.Title className="font-display-up text-[30px] leading-none">Change this decision</Dialog.Title>
+                      <Dialog.Title className="font-display-up text-[16px] leading-tight">Change this decision</Dialog.Title>
                       <p id="chg-desc" className="mt-2 text-sm text-muted">
                         An approval can't break the rules: one store per pin code, and no more approvals than openings. The rules are checked again after you save.
                       </p>

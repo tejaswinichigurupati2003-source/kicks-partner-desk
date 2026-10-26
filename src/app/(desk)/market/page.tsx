@@ -167,7 +167,7 @@ export default function Market() {
           return (
             <Card key={c.city} className="p-5">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="font-display-up text-[28px] leading-none">{c.city}</h3>
+                <h3 className="font-display-up text-[16px] leading-tight">{c.city}</h3>
                 <button className="btn btn-ghost btn-small" disabled={n === "loading"} onClick={() => load(c.city)}>
                   {n === "loading" ? "Looking…" : loaded?.ok ? "Refresh notes" : "Get market notes"}
                 </button>

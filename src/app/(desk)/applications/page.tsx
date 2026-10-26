@@ -15,7 +15,7 @@ function List() {
   const params = useSearchParams();
   const [status, setStatus] = useState<string>(params.get("status") ?? "all");
   const [area, setArea] = useState("all");
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(params.get("q") ?? "");
   const [busy, setBusy] = useState(false);
 
   const rows = useMemo(() => {
@@ -82,10 +82,10 @@ function List() {
               key={s}
               onClick={() => setStatus(s)}
               aria-pressed={status === s}
-              className="min-h-[44px] rounded-md border-2 border-ink px-3 font-bold"
-              style={{ background: status === s ? "var(--lime)" : "var(--surface)" }}
+              className="min-h-[44px] rounded-full border px-4 font-semibold"
+              style={{ background: status === s ? "#e8efff" : "#fff", borderColor: status === s ? "#1f4fd8" : "#cdd6e6" }}
             >
-              {s === "all" ? "All" : STATUS_LABEL[s as Status]} ({s === "all" ? ws.applications.length : ws.applications.filter((a) => result.decisions[a.id]?.status === s).length})
+              {s !== "all" && <span className={`dot dot-${s} mr-2`} aria-hidden="true" />}{s === "all" ? "All" : STATUS_LABEL[s as Status]} ({s === "all" ? ws.applications.length : ws.applications.filter((a) => result.decisions[a.id]?.status === s).length})
             </button>
           ))}
         </div>
@@ -130,7 +130,7 @@ function List() {
               {rows.map((a) => {
                 const d = result.decisions[a.id];
                 return (
-                  <tr key={a.id}>
+                  <tr key={a.id} className={`row-${d.status}`}>
                     <td>
                       <StatusStamp status={d.status} flat />
                     </td>

@@ -26,14 +26,14 @@ export default function Areas() {
             <Card key={t.id} className="p-5" selected={t.slots > 0 && r.openingsLeft === 0}>
               <div className="mt-2 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="font-display-up text-[34px] leading-none">
+                  <h2 className="font-display-up text-[16px] leading-tight">
                     {t.id} · {t.city}
                   </h2>
                   <p className="text-sm text-muted">
                     Tier {t.tier} · {t.priority} priority · {t.pins.length} pin codes
                   </p>
                 </div>
-                <span className="font-display-up text-[40px] leading-none" style={{ color: "var(--orange)" }}>
+                <span className="big-num text-[40px] leading-none" style={{ color: "var(--orange)" }}>
                   {used}/{t.slots}
                 </span>
               </div>
@@ -45,7 +45,7 @@ export default function Areas() {
               </div>
               {r.approved.length > 0 && (
                 <>
-                  <h3 className="font-display-up text-[20px]">Got an opening</h3>
+                  <h3 className="font-display-up text-[16px]">Got an opening</h3>
                   <ul className="mb-3 space-y-1">
                     {r.approved.map((id) => (
                       <li key={id} className="flex flex-wrap items-center gap-2">
@@ -58,7 +58,7 @@ export default function Areas() {
               )}
               {r.waiting.length > 0 && (
                 <>
-                  <h3 className="font-display-up text-[20px]">Waiting list</h3>
+                  <h3 className="font-display-up text-[16px]">Waiting list</h3>
                   <ol className="mb-3 list-decimal space-y-1 pl-5">
                     {r.waiting.map((id) => (
                       <li key={id}>
@@ -68,7 +68,7 @@ export default function Areas() {
                   </ol>
                 </>
               )}
-              <h3 className="font-display-up text-[20px]">Free pin codes</h3>
+              <h3 className="font-display-up text-[16px]">Free pin codes</h3>
               <p className="mono text-sm">{r.freePins.length ? r.freePins.join(", ") : "None. Every pin code here has a store or an approved partner."}</p>
             </Card>
           );

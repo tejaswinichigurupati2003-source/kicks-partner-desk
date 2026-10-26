@@ -125,7 +125,7 @@ export default function Board() {
               const approved = d.status === "approved" || d.status === "conditional";
               const tp = approved ? trainingPlan(a, d) : null;
               return (
-                <tr key={a.id} className="align-top">
+                <tr key={a.id} className={`align-top row-${d.status}`}>
                   <td className="whitespace-nowrap">
                     <StatusStamp status={d.status} flat />
                   </td>

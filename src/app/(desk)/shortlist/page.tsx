@@ -35,7 +35,7 @@ export default function Shortlist() {
           return (
             <li key={s.id}>
               <Link href={`/applications/${s.id}`} className="card card-link flex flex-wrap items-center gap-5 p-4 no-underline">
-                <span className="font-display-up w-20 text-center text-[96px] leading-[0.85]" style={{ background: "var(--lime)", border: "2px solid var(--ink)", borderRadius: 6 }}>
+                <span className="big-num w-20 text-center text-[96px] leading-[0.85]" style={{ background: "var(--lime)", border: "2px solid var(--ink)", borderRadius: 6 }}>
                   {i + 1}
                 </span>
                 <span className="min-w-[220px] flex-1">

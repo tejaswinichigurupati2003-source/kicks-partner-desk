@@ -67,7 +67,7 @@ export default function ImportPage() {
               if (f) void upload(f);
             }}
           >
-            <p className="font-display-up text-[34px] leading-none">Drop your Excel file here</p>
+            <p className="font-display-up text-[16px] leading-tight">Drop your Excel file here</p>
             <p className="text-muted">or choose it from your computer. It needs the sheets Applications, Territories and Existing stores.</p>
             <label htmlFor="file" className="sr-only">
               Choose an Excel file
@@ -91,7 +91,7 @@ export default function ImportPage() {
 
           {report && (
             <Card className="p-5" selected>
-              <h2 className="font-display-up mt-2 text-[30px] leading-none">File checked</h2>
+              <h2 className="font-display-up mt-2 text-[16px] leading-tight">File checked</h2>
               <p className="mt-2">
                 <strong>{report.fileName}</strong>: {report.applicationRows} applications, {report.territoryRows} areas and {report.storeRows} existing stores were read.
               </p>

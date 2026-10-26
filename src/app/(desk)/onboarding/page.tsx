@@ -69,7 +69,7 @@ export default function Onboarding() {
           ["Open", opened],
         ].map(([label, n]) => (
           <Card key={label as string} className="p-4">
-            <div className="font-display-up text-[56px] leading-none" style={{ color: "var(--orange)" }}>
+            <div className="big-num text-[56px] leading-none" style={{ color: "var(--orange)" }}>
               {n}
             </div>
             <div className="font-bold">{label}</div>
@@ -84,7 +84,7 @@ export default function Onboarding() {
             const here = rows.filter((r) => r.current?.n === c.n);
             return (
               <div key={c.key} className="w-[190px] shrink-0">
-                <div className="font-display-up border-b-2 border-ink pb-1 text-[18px] leading-tight">
+                <div className="font-display-up border-b-2 border-ink pb-1 text-[16px] leading-tight">
                   {c.n === 0 ? "Start" : c.n}. {c.name} <span className="mono text-sm">({here.length})</span>
                 </div>
                 <ul className="mt-2 space-y-2">

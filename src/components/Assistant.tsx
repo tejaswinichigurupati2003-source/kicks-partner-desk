@@ -135,7 +135,7 @@ export function Assistant() {
           className="fixed bottom-0 right-0 top-0 z-50 flex w-full max-w-[460px] flex-col border-l-2 border-ink bg-box shadow-[-6px_0_0_#111]"
         >
           <div className="flex items-center justify-between border-b-2 border-ink bg-ink px-4 py-3 text-white">
-            <Dialog.Title className="font-display-up text-[26px] leading-none">Ask assistant</Dialog.Title>
+            <Dialog.Title className="font-display-up text-[16px] leading-tight">Ask assistant</Dialog.Title>
             <Dialog.Close className="min-h-[44px] min-w-[44px] text-2xl text-white" aria-label="Close">
               ×
             </Dialog.Close>

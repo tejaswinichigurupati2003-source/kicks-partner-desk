@@ -50,7 +50,7 @@ export function Card({ children, className = "", selected = false }: { children:
 }
 
 export function SectionTitle({ children }: { children: ReactNode }) {
-  return <h2 className="font-display-up mb-3 text-[28px] leading-none">{children}</h2>;
+  return <h2 className="font-display-up mb-3 text-[16px] leading-tight">{children}</h2>;
 }
 
 export function ShoeboxEmpty() {
@@ -69,7 +69,7 @@ export function EmptyState({ title, text, action }: { title: string; text: strin
   return (
     <Card className="flex flex-col items-center gap-3 px-6 py-12 text-center">
       <ShoeboxEmpty />
-      <h2 className="font-display-up text-[32px] leading-none">{title}</h2>
+      <h2 className="font-display-up text-[16px] leading-tight">{title}</h2>
       <p className="max-w-md text-muted">{text}</p>
       {action}
     </Card>

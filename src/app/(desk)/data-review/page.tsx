@@ -77,7 +77,7 @@ export default function DataReview() {
           ["Things to check", issues.filter((i) => !i.blocking).length],
         ].map(([label, n]) => (
           <Card key={label as string} className="p-4">
-            <div className="font-display-up text-[56px] leading-none" style={{ color: "var(--orange)" }}>
+            <div className="big-num text-[56px] leading-none" style={{ color: "var(--orange)" }}>
               {n}
             </div>
             <div className="font-bold">{label}</div>
@@ -124,11 +124,11 @@ export default function DataReview() {
       ) : (
         <>
           <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by kind">
-            <button className="min-h-[44px] rounded-md border-2 border-ink px-3 font-bold" aria-pressed={kind === "all"} style={{ background: kind === "all" ? "var(--lime)" : "var(--surface)" }} onClick={() => setKind("all")}>
+            <button className="min-h-[44px] rounded-md border border-[#cdd6e6] px-3 font-semibold" aria-pressed={kind === "all"} style={{ background: kind === "all" ? "#e8efff" : "var(--surface)" }} onClick={() => setKind("all")}>
               All ({issues.length})
             </button>
             {counts.map(([k, n]) => (
-              <button key={k} className="min-h-[44px] rounded-md border-2 border-ink px-3 font-bold" aria-pressed={kind === k} style={{ background: kind === k ? "var(--lime)" : "var(--surface)" }} onClick={() => setKind(k)}>
+              <button key={k} className="min-h-[44px] rounded-md border border-[#cdd6e6] px-3 font-semibold" aria-pressed={kind === k} style={{ background: kind === k ? "#e8efff" : "var(--surface)" }} onClick={() => setKind(k)}>
                 {KIND_LABEL[k]} ({n})
               </button>
             ))}

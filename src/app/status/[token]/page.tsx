@@ -48,7 +48,7 @@ export default async function StatusPage({ params }: { params: Promise<{ token: 
       </div>
 
       <section className="mt-8">
-        <h2 className="font-display-up text-[28px] leading-none">Your next step</h2>
+        <h2 className="font-display-up text-[16px] leading-tight">Your next step</h2>
         <ul className="mt-3 space-y-2">
           {s.next.map((n, i) => (
             <li key={i} className="card p-3 text-[15px]">
@@ -60,7 +60,7 @@ export default async function StatusPage({ params }: { params: Promise<{ token: 
 
       {s.stages.length > 0 && (
         <section className="mt-8">
-          <h2 className="font-display-up text-[28px] leading-none">Getting ready to open</h2>
+          <h2 className="font-display-up text-[16px] leading-tight">Getting ready to open</h2>
           <ol className="mt-3 space-y-2">
             {s.stages.map((st, i) => (
               <li key={i} className="flex items-start gap-3">
@@ -80,7 +80,7 @@ export default async function StatusPage({ params }: { params: Promise<{ token: 
 
       {s.offers.length > 0 && (
         <section className="mt-8">
-          <h2 className="font-display-up text-[28px] leading-none">Other options</h2>
+          <h2 className="font-display-up text-[16px] leading-tight">Other options</h2>
           <ul className="mt-3 list-disc space-y-1 pl-5">
             {s.offers.map((o, i) => (
               <li key={i}>{o}</li>
@@ -91,7 +91,7 @@ export default async function StatusPage({ params }: { params: Promise<{ token: 
       )}
 
       <section className="mt-8">
-        <h2 className="font-display-up text-[28px] leading-none">Message from Kicks</h2>
+        <h2 className="font-display-up text-[16px] leading-tight">Message from Kicks</h2>
         <div className="prose-msg indic card mt-3 p-4" lang={lang}>
           {s.message}
         </div>
