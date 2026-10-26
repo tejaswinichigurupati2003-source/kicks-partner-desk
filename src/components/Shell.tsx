@@ -77,7 +77,8 @@ function Nav({ items, active }: { items: typeof MENU; active: (href: string) => 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const { result, hasData } = useDesk();
+  const { result, hasData, sync, newWorkspace, dismissNote } = useDesk();
+  const [copied, setCopied] = useState(false);
   const [q, setQ] = useState("");
   const active = (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(href + "/"));
   const decisions = Object.values(result.decisions);
@@ -133,7 +134,12 @@ export function Shell({ children }: { children: ReactNode }) {
             <Link href="/" className="lg:hidden" aria-label="Kicks Partner Desk, home">
               <Wordmark size={28} />
             </Link>
-            <p className="mr-auto text-[20px] font-bold tracking-tight max-lg:sr-only">{titleFor(path)}</p>
+            <div className="mr-auto">
+              <p className="text-[20px] font-bold tracking-tight max-lg:sr-only">{titleFor(path)}</p>
+              <p className="text-xs text-muted" role="status">
+                {sync.status === "saving" ? "Saving…" : sync.status === "saved" ? "Saved to your team workspace" : sync.status === "paused" ? "Saving is paused. Your work is kept in this browser." : "Saved in this browser only"}
+              </p>
+            </div>
             <form onSubmit={search} role="search" className="relative min-w-[200px] max-w-[420px] flex-1">
               <label htmlFor="global-search" className="sr-only">
                 Search applications
@@ -144,6 +150,50 @@ export function Shell({ children }: { children: ReactNode }) {
                 <path d="M20 20l-4-4" />
               </svg>
             </form>
+            <Popover.Root>
+              <Popover.Trigger asChild>
+                <button className="btn btn-ghost btn-small" disabled={sync.status === "local"} title={sync.status === "local" ? "Saving on the server is not available right now" : undefined}>
+                  Share
+                </button>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content align="end" sideOffset={8} className="card z-50 w-[min(92vw,400px)] p-4">
+                  <p className="font-bold">Share this workspace</p>
+                  <p className="mt-1 text-sm text-muted">Anyone with this link can see and change this workspace. Send it to your team so everyone works from the same list.</p>
+                  <label className="label mt-3" htmlFor="share-link">
+                    Workspace link
+                  </label>
+                  <input id="share-link" className="field mono text-xs" readOnly value={sync.workspaceId ? `${typeof window === "undefined" ? "" : window.location.origin}/w/${sync.workspaceId}` : ""} onFocus={(e) => e.currentTarget.select()} />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      className="btn btn-small"
+                      disabled={!sync.workspaceId}
+                      onClick={async () => {
+                        const link = `${window.location.origin}/w/${sync.workspaceId}`;
+                        try {
+                          await navigator.clipboard.writeText(link);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1800);
+                        } catch {
+                          window.prompt("Copy this link:", link);
+                        }
+                      }}
+                    >
+                      {copied ? "Copied" : "Copy link"}
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-small"
+                      onClick={() => {
+                        if (window.confirm("Start a new, empty workspace in this browser? The current one stays available to anyone who has its link.")) void newWorkspace();
+                      }}
+                    >
+                      Start a new workspace
+                    </button>
+                  </div>
+                  <p className="mt-3 text-xs text-muted">Workspaces are deleted after 7 days without changes.</p>
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover.Root>
             <Popover.Root>
               <Popover.Trigger asChild>
                 <button className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-[#cdd6e6] bg-white text-ink" aria-label={`Notifications: ${unread.length} unread`}>
@@ -194,6 +244,14 @@ export function Shell({ children }: { children: ReactNode }) {
               </span>
             </div>
           </header>
+          {sync.note && (
+            <div role="status" className="card mb-5 flex items-start justify-between gap-3 border-[#f4d9a0] bg-[#fffaf0] p-4 text-sm">
+              <span>{sync.note}</span>
+              <button className="min-h-[44px] font-semibold text-cobalt" onClick={dismissNote}>
+                Dismiss
+              </button>
+            </div>
+          )}
           <main id="main" className="pb-28 lg:pb-8">
             {children}
           </main>

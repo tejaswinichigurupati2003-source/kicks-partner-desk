@@ -31,8 +31,10 @@ Environment variables (all optional):
 | `CRON_SECRET` | Protects the daily clean-up at `/api/cron/purge`. |
 | `LANGSEARCH_API_KEY` | Switches on live market notes on the Market page (web search). |
 
-## Data
+## Data and teams
 
-Nothing is stored on the server. Uploaded files are read and discarded. Results stay in the browser for 7 days. Private status pages are signed, self-contained links that show only that applicant's information as of the day the link was made.
+Each new visitor gets a private workspace. Changes are saved to Neon within a couple of seconds and kept for 7 days after the last change. The **Share** button in the top bar gives a link; anyone who opens it works in the same workspace, and teammates' changes appear within about 10 seconds. A save made from an out-of-date copy is refused and the latest version is loaded, so nobody overwrites a teammate silently. If the database is unavailable the Desk keeps working and keeps results in the browser.
+
+Uploaded files are read and discarded. Private applicant status pages are signed links that show only that applicant's information as of the day the link was made.
 
 `node scripts/make-fixture.mjs` writes a workbook with messy and competing applications to `fixtures/` for trying the import.

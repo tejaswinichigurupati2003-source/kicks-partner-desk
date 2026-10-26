@@ -46,8 +46,17 @@ const empty = (): Workspace => ({
   report: [],
 });
 
+export interface SyncState {
+  status: "local" | "saving" | "saved" | "paused";
+  workspaceId: string | null;
+  note: string | null;
+}
+
 interface Desk {
   ready: boolean;
+  sync: SyncState;
+  newWorkspace: () => Promise<void>;
+  dismissNote: () => void;
   ws: Workspace;
   result: RunResult;
   now: Date;
@@ -72,35 +81,61 @@ export function DeskProvider({ children }: { children: ReactNode }) {
   const [ws, setWs] = useState<Workspace>(empty);
   const [ready, setReady] = useState(false);
   const [now, setNow] = useState(() => new Date());
-  const loaded = useRef(false);
+  const [sync, setSync] = useState<SyncState>({ status: "local", workspaceId: null, note: null });
   const serverOn = useRef(false);
-  const hadLocal = useRef(false);
+  const rev = useRef(0);
+  const dirty = useRef(false);
+  const applyingServer = useRef(false);
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
+
+  /** Replaces the workspace with what the server holds, without sending it straight back. */
+  const applyServer = useCallback((data: Workspace, serverRev: number) => {
+    applyingServer.current = true;
+    rev.current = serverRev;
+    dirty.current = false;
+    setWs({ ...empty(), ...data, report: data.report ?? [], stores: data.stores?.length ? data.stores : EXISTING_STORES });
+  }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const joined = params.get("joined") === "1";
+    let hadLocal = false;
     try {
-      const raw = localStorage.getItem(KEY);
+      if (joined) localStorage.removeItem(KEY);
+      const raw = joined ? null : localStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Workspace;
         const age = (Date.now() - new Date(parsed.savedAt).getTime()) / 86400000;
-        if (parsed.v === 1 && age <= KEEP_DAYS) hadLocal.current = true;
-        if (parsed.v === 1 && age <= KEEP_DAYS) setWs({ ...empty(), ...parsed, report: parsed.report ?? [], stores: parsed.stores?.length ? parsed.stores : EXISTING_STORES });
-        else localStorage.removeItem(KEY);
+        if (parsed.v === 1 && age <= KEEP_DAYS) {
+          hadLocal = (parsed.applications?.length ?? 0) > 0;
+          setWs({ ...empty(), ...parsed, report: parsed.report ?? [], stores: parsed.stores?.length ? parsed.stores : EXISTING_STORES });
+        } else localStorage.removeItem(KEY);
       }
     } catch {
       /* storage blocked: the Desk still works for this visit */
     }
-    loaded.current = true;
+    if (joined || params.has("workspace")) {
+      params.delete("joined");
+      const missing = params.get("workspace") === "missing";
+      params.delete("workspace");
+      window.history.replaceState(null, "", window.location.pathname + (params.toString() ? `?${params}` : ""));
+      if (missing) setSync((s) => ({ ...s, note: "That workspace link is no longer valid. You are in your own workspace." }));
+    }
     setNow(new Date());
     setReady(true);
-    // When saving is available, pick up this browser's saved workspace from the server.
     fetch("/api/workspace")
       .then((r) => r.json())
-      .then((j: { ok: boolean; data?: Workspace | null }) => {
-        serverOn.current = !!j.ok;
-        if (j.ok && j.data && j.data.v === 1 && !hadLocal.current) setWs({ ...empty(), ...j.data, report: j.data.report ?? [] });
+      .then((j: { ok: boolean; id?: string | null; data?: Workspace | null; rev?: number }) => {
+        if (!j.ok) return;
+        serverOn.current = true;
+        setSync((s) => ({ ...s, status: "saved", workspaceId: j.id ?? null }));
+        if (j.data && j.data.v === 1) applyServer(j.data, j.rev ?? 0);
+        else if (hadLocal) dirty.current = true; // the server has nothing yet: save what this browser has
+        if (!j.data && hadLocal) setWs((w) => ({ ...w }));
       })
       .catch(() => undefined);
-  }, []);
+  }, [applyServer]);
 
   useEffect(() => {
     if (!ready) return;
@@ -111,13 +146,62 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     }
   }, [ws, ready]);
 
+  // Save to the shared workspace shortly after every change.
   useEffect(() => {
     if (!ready || !serverOn.current) return;
-    const t = setTimeout(() => {
-      fetch("/api/workspace", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ws) }).catch(() => undefined);
-    }, 1500);
+    if (applyingServer.current) {
+      applyingServer.current = false;
+      return;
+    }
+    dirty.current = true;
+    setSync((s) => (s.status === "paused" ? s : { ...s, status: "saving" }));
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/workspace", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: wsRef.current, rev: rev.current }) });
+        const j = (await res.json()) as { ok: boolean; reason?: string; rev?: number; id?: string; data?: Workspace | null };
+        if (j.ok) {
+          rev.current = j.rev ?? rev.current;
+          dirty.current = false;
+          setSync((s) => ({ status: "saved", workspaceId: j.id ?? s.workspaceId, note: null }));
+        } else if (j.reason === "conflict" && j.data) {
+          applyServer(j.data, j.rev ?? 0);
+          setSync((s) => ({ ...s, status: "saved", note: "A teammate saved a change at the same time, so we loaded their latest version. Please repeat your last change if it is missing." }));
+        } else setSync((s) => ({ ...s, status: "paused" }));
+      } catch {
+        setSync((s) => ({ ...s, status: "paused" }));
+      }
+    }, 1200);
     return () => clearTimeout(t);
-  }, [ws, ready]);
+  }, [ws, ready, applyServer]);
+
+  // Pick up teammates' changes.
+  useEffect(() => {
+    if (!ready) return;
+    const timer = setInterval(async () => {
+      if (!serverOn.current || dirty.current || document.hidden) return;
+      try {
+        const j = (await (await fetch("/api/workspace")).json()) as { ok: boolean; data?: Workspace | null; rev?: number };
+        if (j.ok && j.data && (j.rev ?? 0) > rev.current) applyServer(j.data, j.rev ?? 0);
+      } catch {
+        /* try again next time */
+      }
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [ready, applyServer]);
+
+  const newWorkspace = useCallback(async () => {
+    try {
+      await fetch("/api/workspace", { method: "DELETE" });
+      const j = (await (await fetch("/api/workspace")).json()) as { ok: boolean; id?: string | null };
+      applyingServer.current = true;
+      rev.current = 0;
+      dirty.current = false;
+      setWs(empty());
+      setSync({ status: j.ok ? "saved" : "local", workspaceId: j.id ?? null, note: null });
+    } catch {
+      /* stay in the current workspace */
+    }
+  }, []);
 
   const result = useMemo(() => {
     try {
@@ -180,6 +264,7 @@ export function DeskProvider({ children }: { children: ReactNode }) {
     setWs(empty());
   }, []);
 
-  const value: Desk = { ready, ws, result, now, hasData: ws.applications.length > 0, importData, saveChange, setOverride, clearOverride, setStage, clearAll };
+  const dismissNote = () => setSync((x) => ({ ...x, note: null }));
+  const value: Desk = { ready, sync, newWorkspace, dismissNote, ws, result, now, hasData: ws.applications.length > 0, importData, saveChange, setOverride, clearOverride, setStage, clearAll };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
