@@ -67,3 +67,24 @@ export function readNotes(a: Application): NoteFindings {
   }
   return { contradictions, suggestions, instruction: hasInstruction(notes) || hasInstruction(a.business) };
 }
+
+export interface ReadText {
+  business: "high" | "medium" | "low";
+  contradictions: string[];
+  suggestions: string[];
+  instruction: boolean;
+  fromAssistant: boolean;
+}
+
+/**
+ * Combines the keyword reading with the language assistant's hints, when there are any.
+ * The keyword checks always run, so the result is the same with the assistant off.
+ */
+export function readText(a: Application, hint?: import("./types").Hint): ReadText {
+  const found = readNotes(a);
+  const keyword = businessRelevance(a);
+  const business = hint && hint.business !== "unknown" ? hint.business : keyword;
+  const contradictions = Array.from(new Set([...found.contradictions, ...(hint?.contradictions ?? [])]));
+  const suggestions = Array.from(new Set([...found.suggestions, ...(hint?.claims ?? []).map((c) => `${c} Confirm with the applicant before changing anything.`)]));
+  return { business, contradictions, suggestions, instruction: found.instruction || !!hint?.instruction, fromAssistant: !!hint && hint.source === "assistant" };
+}

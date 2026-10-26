@@ -148,7 +148,7 @@ function next(id: string, ctx: AssistantContext): Reply {
       for (const c of d.condition) lines.push(`- ${c.text}`);
       lines.push("", "Then, getting ready to open (about 10 weeks):");
     } else lines.push("Next steps, about 10 weeks to open:");
-    for (const s of stagesFor(d).filter((x) => x.n >= 1 && x.n <= 4)) lines.push(`- Weeks ${s.from}–${s.to} · ${s.name} (${s.owner})`);
+    for (const s of stagesFor(d).slice(0, 4)) lines.push(`- ${s.name} (${s.owner})`);
     lines.push("", "Open the applicant's page to see all stages and update them.");
   } else if (d.status === "needs_info") lines.push(`Ask the applicant: ${d.ask}`, "They should reply within 7 days.");
   else if (d.status === "waiting") {

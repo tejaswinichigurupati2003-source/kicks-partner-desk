@@ -61,30 +61,65 @@ function splitCityState(cityCell: Cell, stateCell: Cell): { city: string; state:
   return { city: canonicalCity(city) ?? city, state };
 }
 
-export function cleanApplication(row: RawRow): Application {
-  const { city, state } = splitCityState(keyOf(row, "City"), keyOf(row, "State"));
+const LANG_WORDS: { lang: Language; re: RegExp }[] = [
+  { lang: "Kannada", re: /kannada|ಕನ್ನಡ|\bkn\b/i },
+  { lang: "Hindi", re: /hindi|हिन्दी|हिंदी|\bhi\b/i },
+  { lang: "English", re: /english|ಇಂಗ್ಲಿಷ್|अंग्रेज़ी|अंग्रेजी|\ben\b/i },
+];
+
+/** Reads a preferred language written in free text. The first language mentioned wins. */
+export function readLanguage(raw: string): { language: Language; note?: string } {
+  const t = raw.trim();
+  if (!t) return { language: "English", note: "Preferred language was blank, so English is used." };
+  let best: { lang: Language; at: number } | null = null;
+  for (const w of LANG_WORDS) {
+    const m = w.re.exec(t);
+    if (m && (best === null || m.index < best.at)) best = { lang: w.lang, at: m.index };
+  }
+  if (!best) return { language: "English", note: `Preferred language "${t}" was not recognised, so English is used.` };
+  const exact = ["kannada", "english", "hindi"].includes(t.toLowerCase());
+  return exact ? { language: best.lang } : { language: best.lang, note: `Preferred language "${t}" was read as ${best.lang}.` };
+}
+
+export function cleanApplication(row: RawRow, rowNumber?: number): Application {
+  const cleaned: string[] = [];
+  const cityCell = keyOf(row, "City");
+  const { city, state } = splitCityState(cityCell, keyOf(row, "State"));
+  const rawCity = s(cityCell);
+  if (rawCity && city !== rawCity && canonicalCity(rawCity)) cleaned.push(`City "${rawCity}" was read as ${city}.`);
+  const pinCell = keyOf(row, "Pin code", "Pin");
+  const pin = cleanPin(pinCell);
+  if (typeof pinCell === "string" && s(pinCell) !== pin) cleaned.push(`Pin code "${s(pinCell)}" was read as ${pin}.`);
   const inv = parseNumber(keyOf(row, "Investment"));
+  const invCell = keyOf(row, "Investment");
+  if (typeof invCell === "string" && inv.value !== null && String(inv.value) !== s(invCell)) cleaned.push(`Investment "${s(invCell)}" was read as ${inv.value} lakh.`);
   const exp = parseNumber(keyOf(row, "Retail experience", "Experience"));
   const size = parseNumber(keyOf(row, "Space size", "Size"));
   const target = parseNumber(keyOf(row, "Target launch", "Target"));
-  const language = pick(keyOf(row, "Preferred language", "Language"), ["Kannada", "English", "Hindi"] as const) ?? "English";
+  const lang = readLanguage(s(keyOf(row, "Preferred language", "Language")));
+  if (lang.note) cleaned.push(lang.note);
+  const spaceCell = s(keyOf(row, "Space available", "Space avail"));
+  const space = pick<Space>(spaceCell, ["Owned", "Rented", "Not yet identified"]);
+  if (spaceCell && space && space !== spaceCell) cleaned.push(`Space "${spaceCell}" was read as ${space}.`);
   return {
     id: s(keyOf(row, "Application ID", "ID")),
     name: s(keyOf(row, "Applicant name", "Name")),
     city,
     state,
-    pin: cleanPin(keyOf(row, "Pin code", "Pin")),
+    pin,
     investment: inv.value,
     investmentProblem: inv.problem,
     experience: exp.value,
     experienceProblem: exp.problem,
     business: s(keyOf(row, "Current / past business", "Current", "Business")),
-    space: pick<Space>(keyOf(row, "Space available", "Space avail"), ["Owned", "Rented", "Not yet identified"]),
+    space,
     size: size.value !== null && size.value >= 0 ? size.value : null,
     floor: pick<Floor>(keyOf(row, "Floor"), ["Ground", "Upper", "Mall unit", "Not known"]),
     target: target.value,
-    language: language as Language,
+    language: lang.language,
     notes: s(keyOf(row, "Notes from applicant", "Notes")),
+    cleaned,
+    row: rowNumber,
   };
 }
 
