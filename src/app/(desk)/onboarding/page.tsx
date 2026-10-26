@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { StageBoard, type BoardRow } from "./StageBoard";
 import { useDesk } from "@/lib/desk";
-import { STAGE_DEFS, buildTimeline, stagesFor, stageWindow, trainingPlan } from "@/engine/plans";
+import { STAGE_DEFS, buildTimeline, stagesFor, stageWindow, trainingPlan, type StageKey, type StageStatus } from "@/engine/plans";
 import { HOLDS_OPENING } from "@/engine/run";
 import { Card, EmptyState, ImportButton, Loading, PageHeader, SectionTitle, StatusStamp } from "@/components/ui";
 
 export default function Onboarding() {
-  const { ready, hasData, ws, result, now } = useDesk();
+  const { ready, hasData, ws, result, now, setStages } = useDesk();
   const asm = result.assumptions;
 
   const rows = useMemo(() => {
@@ -28,6 +29,17 @@ export default function Onboarding() {
         return { a, d, stages, current, overdue, stuck, done, days, plan: trainingPlan(a, d, asm), timeline: buildTimeline(a, d, now, asm) };
       });
   }, [ws, result, now, asm]);
+
+  /** Earlier stages become done, the chosen stage is in progress, later stages are not started. */
+  const moveCard = (row: BoardRow, target: StageKey | "ready"): string | null => {
+    const keys = row.stages.map((x) => x.key);
+    if (target !== "ready" && !keys.includes(target)) return `${row.a.id} already has a space, so there is no "Find a space" stage for them.`;
+    const at = target === "ready" ? keys.length : keys.indexOf(target);
+    const next: Record<string, StageStatus> = {};
+    keys.forEach((k, i) => (next[k] = i < at ? "Done" : i === at ? "In progress" : "Not started"));
+    setStages(row.a.id, next, `${row.a.id} moved to ${target === "ready" ? "Ready to open" : STAGE_DEFS.find((x) => x.key === target)?.name}.`);
+    return null;
+  };
 
   if (!ready) return <Loading />;
   const intro = "Everyone who has been given an opening, and where they are on the way to opening: which stage, who is late, how they will be trained, and when they should open.";
@@ -79,33 +91,7 @@ export default function Onboarding() {
       </section>
 
       <SectionTitle>Where everyone is</SectionTitle>
-      <div className="mb-10 overflow-x-auto pb-3">
-        <div className="flex min-w-max gap-4">
-          {STAGE_DEFS.map((c, i) => {
-            const here = rows.filter((r) => r.current?.key === c.key);
-            return (
-              <div key={c.key} className="w-[190px] shrink-0">
-                <h3 className="border-b-2 border-[#cdd6e6] pb-1 text-[15px] font-bold leading-tight">
-                  {i + 1}. {c.name} <span className="mono text-sm">({here.length})</span>
-                </h3>
-                <ul className="mt-2 space-y-2">
-                  {here.map((r) => (
-                    <li key={r.a.id}>
-                      <Link href={`/applications/${r.a.id}`} className={`card card-link p-2 text-sm no-underline tint-${r.d.status}`} style={{ boxShadow: r.overdue ? "0 0 0 2px var(--error)" : undefined }}>
-                        <span className="mono font-bold">{r.a.id}</span> {r.a.name}
-                        <br />
-                        <span className="text-muted">{r.a.city}</span>
-                        {r.overdue && <span className="block font-bold text-danger">! Overdue</span>}
-                        {r.stuck && <span className="block font-bold text-danger">! Stuck</span>}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      <StageBoard rows={rows} onMove={moveCard} />
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <section>
