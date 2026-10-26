@@ -65,7 +65,7 @@ function titleFor(path: string): string {
   return hit?.label ?? "Kicks Partner Desk";
 }
 
-/** A sidebar group the person can fold away. The choice is remembered in this browser only. */
+/** A sidebar group the person can fold away. Closed by default; the choice is remembered in this browser only. */
 function Group({
   id,
   title,
@@ -77,10 +77,10 @@ function Group({
   summary?: string;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     try {
-      if (localStorage.getItem("kicks_nav_" + id) === "closed") setOpen(false);
+      if (localStorage.getItem("kicks_nav_" + id) === "open") setOpen(true);
     } catch {}
   }, [id]);
   const toggle = () => {
