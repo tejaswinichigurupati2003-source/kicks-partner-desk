@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, type FormEvent, type ReactNode } from "react";
 import * as Popover from "@radix-ui/react-popover";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useDesk } from "@/lib/desk";
 import { useAlerts } from "@/lib/alerts";
 import { STATUS_LABEL } from "@/engine/run";
@@ -24,6 +24,8 @@ const ICONS: Record<string, string> = {
   insights: "M3 17l6-6 4 4 8-9",
   start: "M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.3l1-6.2L3 9.7l6.2-.9z",
   stores: "M4 10l1-5h14l1 5M5 10v9h14v-9M9 19v-5h6v5",
+  assumptions: "M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M14 4v4M8 10v4M16 16v4",
+  audit: "M7 4h10v16H7zM10 8h4M10 12h4M10 16h2",
 };
 
 function Icon({ name }: { name: string }) {
@@ -48,9 +50,11 @@ const WORK = [
   { href: "/onboarding", label: "Onboarding", icon: "onboarding" },
   { href: "/data-review", label: "Data review", icon: "review" },
   { href: "/insights", label: "Insights", icon: "insights" },
+  { href: "/assumptions", label: "Assumptions", icon: "assumptions" },
+  { href: "/audit", label: "Audit log", icon: "audit" },
   { href: "/stores", label: "Our stores", icon: "stores" },
 ];
-const STATUSES: Status[] = ["approved", "conditional", "needs_info", "waiting", "not_eligible"];
+const STATUSES: Status[] = ["approved", "conditional", "redirected", "waiting", "needs_info", "not_in_plan", "not_eligible", "withdrawn"];
 
 function titleFor(path: string): string {
   if (path === "/") return "Overview";
@@ -77,13 +81,15 @@ function Nav({ items, active }: { items: typeof MENU; active: (href: string) => 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const router = useRouter();
-  const { result, hasData, sync, newWorkspace, dismissNote } = useDesk();
-  const [copied, setCopied] = useState(false);
+  const { result, hasData, runId, save, localOnly, note, dismissNote, actor, setActor, newWorkspace } = useDesk();
+  const { alerts, unread, isUnread, markRead } = useAlerts();
   const [q, setQ] = useState("");
+  const [copied, setCopied] = useState(false);
   const active = (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(href + "/"));
   const decisions = Object.values(result.decisions);
   const count = (s: Status) => decisions.filter((d) => d.status === s).length;
-  const { alerts, unread, isUnread, markRead } = useAlerts();
+  const saveText = localOnly ? "Saving isn't available. Changes stay in this tab." : save === "saving" ? "Saving…" : save === "error" ? "Couldn't save. We'll retry with your next change." : "All changes saved";
+  const link = runId && typeof window !== "undefined" ? `${window.location.origin}/run/${runId}` : "";
 
   const search = (e: FormEvent) => {
     e.preventDefault();
@@ -136,8 +142,8 @@ export function Shell({ children }: { children: ReactNode }) {
             </Link>
             <div className="mr-auto">
               <p className="text-[20px] font-bold tracking-tight max-lg:sr-only">{titleFor(path)}</p>
-              <p className="text-xs text-muted" role="status">
-                {sync.status === "saving" ? "Saving…" : sync.status === "saved" ? "Saved to your team workspace" : sync.status === "paused" ? "Saving is paused. Your work is kept in this browser." : "Saved in this browser only"}
+              <p className="text-xs text-muted" role="status" aria-live="polite">
+                {saveText}
               </p>
             </div>
             <form onSubmit={search} role="search" className="relative min-w-[200px] max-w-[420px] flex-1">
@@ -150,26 +156,26 @@ export function Shell({ children }: { children: ReactNode }) {
                 <path d="M20 20l-4-4" />
               </svg>
             </form>
+
             <Popover.Root>
               <Popover.Trigger asChild>
-                <button className="btn btn-ghost btn-small" disabled={sync.status === "local"} title={sync.status === "local" ? "Saving on the server is not available right now" : undefined}>
+                <button className="btn btn-ghost btn-small" disabled={!runId}>
                   Share
                 </button>
               </Popover.Trigger>
               <Popover.Portal>
-                <Popover.Content align="end" sideOffset={8} className="card z-50 w-[min(92vw,400px)] p-4">
-                  <p className="font-bold">Share this workspace</p>
-                  <p className="mt-1 text-sm text-muted">Anyone with this link can see and change this workspace. Send it to your team so everyone works from the same list.</p>
+                <Popover.Content align="end" sideOffset={8} className="card z-50 w-[min(92vw,420px)] p-4">
+                  <p className="font-bold">Share this run</p>
+                  <p className="mt-1 text-sm text-muted">Anyone with this link can see and change this run, with no sign-in. Send it to your team so everyone works from the same list.</p>
                   <label className="label mt-3" htmlFor="share-link">
-                    Workspace link
+                    Run link
                   </label>
-                  <input id="share-link" className="field mono text-xs" readOnly value={sync.workspaceId ? `${typeof window === "undefined" ? "" : window.location.origin}/w/${sync.workspaceId}` : ""} onFocus={(e) => e.currentTarget.select()} />
+                  <input id="share-link" className="field mono text-xs" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
                       className="btn btn-small"
-                      disabled={!sync.workspaceId}
+                      disabled={!link}
                       onClick={async () => {
-                        const link = `${window.location.origin}/w/${sync.workspaceId}`;
                         try {
                           await navigator.clipboard.writeText(link);
                           setCopied(true);
@@ -184,16 +190,21 @@ export function Shell({ children }: { children: ReactNode }) {
                     <button
                       className="btn btn-ghost btn-small"
                       onClick={() => {
-                        if (window.confirm("Start a new, empty workspace in this browser? The current one stays available to anyone who has its link.")) void newWorkspace();
+                        if (window.confirm("Start a new, empty run in this browser? The current one stays available to anyone who has its link.")) void newWorkspace();
                       }}
                     >
-                      Start a new workspace
+                      Start a new run
                     </button>
                   </div>
-                  <p className="mt-3 text-xs text-muted">Workspaces are deleted after 7 days without changes.</p>
+                  <label className="label mt-4" htmlFor="actor-name">
+                    Your name (shown in the audit log)
+                  </label>
+                  <input id="actor-name" className="field" defaultValue={actor === "Team member" ? "" : actor} placeholder="Team member" onBlur={(e) => setActor(e.target.value)} />
+                  <p className="mt-3 text-xs text-muted">Runs are deleted after 7 days without changes.</p>
                 </Popover.Content>
               </Popover.Portal>
             </Popover.Root>
+
             <Popover.Root>
               <Popover.Trigger asChild>
                 <button className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-[#cdd6e6] bg-white text-ink" aria-label={`Notifications: ${unread.length} unread`}>
@@ -234,19 +245,10 @@ export function Shell({ children }: { children: ReactNode }) {
                 </Popover.Content>
               </Popover.Portal>
             </Popover.Root>
-            <div className="flex items-center gap-3 border-l border-soft-line pl-4 max-sm:hidden">
-              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e8efff] font-bold" style={{ color: "#12306b" }} aria-hidden="true">
-                E
-              </span>
-              <span className="leading-tight">
-                <strong className="block text-[14px]">Expansion team</strong>
-                <span className="text-xs text-muted">Kicks Partner Desk</span>
-              </span>
-            </div>
           </header>
-          {sync.note && (
+          {note && (
             <div role="status" className="card mb-5 flex items-start justify-between gap-3 border-[#f4d9a0] bg-[#fffaf0] p-4 text-sm">
-              <span>{sync.note}</span>
+              <span>{note}</span>
               <button className="min-h-[44px] font-semibold text-cobalt" onClick={dismissNote}>
                 Dismiss
               </button>

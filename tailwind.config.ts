@@ -2,7 +2,7 @@ import type { Config } from "tailwindcss";
 
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
-  safelist: [{ pattern: /^(s|row|dot|tint)-(approved|conditional|needs_info|waiting|not_eligible)$/ }],
+  safelist: [{ pattern: /^(s|row|dot|tint)-(approved|conditional|redirected|needs_info|waiting|not_in_plan|not_eligible|withdrawn)$/ }],
   theme: {
     extend: {
       colors: {

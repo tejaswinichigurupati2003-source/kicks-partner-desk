@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { STATUS_LABEL } from "@/engine/run";
+import { DEFAULT_ASSUMPTIONS } from "@/engine/config";
 import type { Status, ScoreParts } from "@/engine/types";
 
 export function Wordmark({ light = false, size = 34 }: { light?: boolean; size?: number }) {
@@ -16,10 +17,12 @@ export function Wordmark({ light = false, size = 34 }: { light?: boolean; size?:
   );
 }
 
+export const STATUS_MARK: Record<Status, string> = { approved: "✓", conditional: "◐", redirected: "↪", waiting: "…", needs_info: "?", not_in_plan: "–", not_eligible: "✕", withdrawn: "↩" };
+
 export function StatusStamp({ status, flat = false }: { status: Status; flat?: boolean }) {
   return (
     <span className={`stamp s-${status} ${flat ? "stamp-flat" : ""}`}>
-      <span aria-hidden="true">{status === "approved" ? "✓ " : status === "conditional" ? "◐ " : status === "needs_info" ? "? " : status === "waiting" ? "… " : "✕ "}</span>
+      <span aria-hidden="true">{STATUS_MARK[status]} </span>
       {STATUS_LABEL[status]}
     </span>
   );
@@ -92,26 +95,26 @@ export function Term({ children, hint }: { children: ReactNode; hint: string }) 
   );
 }
 
-const PART_LABEL: Record<keyof ScoreParts, { name: string; max: number }> = {
-  investment: { name: "Investment", max: 25 },
-  space: { name: "Space", max: 25 },
-  experience: { name: "Retail experience", max: 20 },
-  launch: { name: "Launch timeline", max: 10 },
-  business: { name: "Business background", max: 10 },
-  complete: { name: "Complete application", max: 10 },
+export const PART_LABEL: Record<keyof ScoreParts, string> = {
+  investment: "Investment",
+  space: "Space readiness",
+  experience: "Retail experience",
+  timeline: "Timeline realism",
+  priority: "Area priority",
+  completeness: "Complete application",
 };
 
-export function ScoreBreakdown({ parts }: { parts: ScoreParts }) {
+export function ScoreBreakdown({ parts, weights = DEFAULT_ASSUMPTIONS.weights }: { parts: ScoreParts; weights?: Record<keyof ScoreParts, number> }) {
   return (
     <ul className="space-y-2">
       {(Object.keys(PART_LABEL) as (keyof ScoreParts)[]).map((k) => (
         <li key={k} className="grid grid-cols-[150px_1fr_64px] items-center gap-3 text-sm max-sm:grid-cols-[120px_1fr_56px]">
-          <span>{PART_LABEL[k].name}</span>
+          <span>{PART_LABEL[k]}</span>
           <span className="h-3 overflow-hidden rounded-sm border-2 border-ink bg-box" role="presentation">
-            <span className="block h-full bg-ink" style={{ width: `${Math.min(100, (parts[k] / PART_LABEL[k].max) * 100)}%` }} />
+            <span className="block h-full bg-ink" style={{ width: `${Math.min(100, (parts[k] / weights[k]) * 100)}%` }} />
           </span>
           <span className="mono text-right">
-            {parts[k]}/{PART_LABEL[k].max}
+            {parts[k]}/{weights[k]}
           </span>
         </li>
       ))}

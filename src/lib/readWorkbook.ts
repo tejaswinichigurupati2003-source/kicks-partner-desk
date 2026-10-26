@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { CONFIG, EXISTING_STORES } from "@/engine/config";
 import { cleanApplication, cleanStore, cleanTerritory, isTemplateExample, type Cell, type RawRow } from "@/engine/normalise";
 import type { Application, Store, Territory } from "@/engine/types";
+import type { DataHealth } from "./workspace";
 
 export interface FileReport {
   applicationRows: number;
@@ -16,6 +17,7 @@ export interface ReadResult {
   territories: Territory[];
   stores: Store[];
   report: FileReport;
+  health: DataHealth;
 }
 export interface ReadError {
   ok: false;
@@ -36,13 +38,18 @@ function plain(v: ExcelJS.CellValue): Cell {
   return null;
 }
 
-function sheetRows(ws: ExcelJS.Worksheet, marker: string): RawRow[] | null {
+interface SheetRead {
+  headers: string[];
+  headerRow: number;
+  rows: { row: number; raw: RawRow }[];
+}
+
+function sheetRows(ws: ExcelJS.Worksheet, marker: string): SheetRead | null {
   let headerRow = -1;
   const limit = Math.min(ws.rowCount, 30);
   for (let r = 1; r <= limit; r++) {
-    const row = ws.getRow(r);
     let hit = false;
-    row.eachCell((cell) => {
+    ws.getRow(r).eachCell((cell) => {
       const v = plain(cell.value);
       if (typeof v === "string" && v.trim().toLowerCase() === marker.toLowerCase()) hit = true;
     });
@@ -56,7 +63,7 @@ function sheetRows(ws: ExcelJS.Worksheet, marker: string): RawRow[] | null {
   ws.getRow(headerRow).eachCell({ includeEmpty: false }, (cell, col) => {
     headers[col] = String(plain(cell.value) ?? "").trim();
   });
-  const rows: RawRow[] = [];
+  const rows: SheetRead["rows"] = [];
   for (let r = headerRow + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     const obj: RawRow = {};
@@ -67,9 +74,9 @@ function sheetRows(ws: ExcelJS.Worksheet, marker: string): RawRow[] | null {
       if (v !== null && String(v).trim() !== "") any = true;
       obj[h] = v;
     });
-    if (any) rows.push(obj);
+    if (any) rows.push({ row: r, raw: obj });
   }
-  return rows;
+  return { headers, headerRow, rows };
 }
 
 function findSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | undefined {
@@ -98,72 +105,120 @@ export async function readWorkbook(buffer: Buffer, fileName: string): Promise<Re
   const missing = [!appSheet && "Applications", !terSheet && "Territories"].filter(Boolean) as string[];
   if (missing.length) return { ok: false, error: `The sheet ${missing.join(" and ")} is missing. The file needs sheets named Applications, Territories and Existing stores.` };
 
+  const appRead = sheetRows(appSheet!, "Application ID");
+  if (!appRead) return { ok: false, error: 'We couldn\'t find the heading "Application ID" on the Applications sheet.' };
+  const terRead = sheetRows(terSheet!, "Territory ID");
+  if (!terRead) return { ok: false, error: 'We couldn\'t find the heading "Territory ID" on the Territories sheet.' };
+  if (appRead.rows.length > CONFIG.maxRows) return { ok: false, error: `The Applications sheet has more than ${CONFIG.maxRows} rows. Please split it into smaller files.` };
+
+  const errors: DataHealth["errors"] = [];
+  const changes: DataHealth["changes"] = [];
   const messages: string[] = [];
-  const appRaw = sheetRows(appSheet!, "Application ID");
-  if (!appRaw) return { ok: false, error: 'We couldn\'t find the heading "Application ID" on the Applications sheet.' };
-  const terRaw = sheetRows(terSheet!, "Territory ID");
-  if (!terRaw) return { ok: false, error: 'We couldn\'t find the heading "Territory ID" on the Territories sheet.' };
-  if (appRaw.length > CONFIG.maxRows) return { ok: false, error: `The Applications sheet has more than ${CONFIG.maxRows} rows. Please split it into smaller files.` };
 
   const applications: Application[] = [];
-  const seen = new Set<string>();
-  let skippedExample = 0;
-  for (const raw of appRaw) {
-    const a = cleanApplication(raw);
+  const seen = new Map<string, number>();
+  let exampleRow: number | null = null;
+  for (const { row, raw } of appRead.rows) {
+    const a = cleanApplication(raw, row);
     if (isTemplateExample(a)) {
-      skippedExample++;
+      exampleRow = row;
       continue;
     }
     if (!a.id) {
-      messages.push("A row without an Application ID was skipped.");
+      errors.push({ sheet: "Applications", row, text: "No Application ID, so the row was skipped." });
       continue;
     }
     if (seen.has(a.id)) {
-      messages.push(`${a.id} appears more than once. The first one was kept and the later one was skipped.`);
+      errors.push({ sheet: "Applications", row, text: `${a.id} already appears in row ${seen.get(a.id)}. The first one was kept and this row was skipped.` });
       continue;
     }
-    seen.add(a.id);
+    seen.set(a.id, row);
+    if (a.investmentProblem && a.investmentProblem !== "blank") errors.push({ sheet: "Applications", row, text: `${a.id}: investment is ${a.investmentProblem}.` });
+    if (a.experienceProblem && a.experienceProblem !== "blank") errors.push({ sheet: "Applications", row, text: `${a.id}: retail experience is ${a.experienceProblem}.` });
+    if (a.pin && !/^\d{6}$/.test(a.pin)) errors.push({ sheet: "Applications", row, text: `${a.id}: pin code "${a.pin}" is not 6 digits.` });
+    if (a.space === null && String(raw["Space available"] ?? "").trim() !== "") errors.push({ sheet: "Applications", row, text: `${a.id}: space "${String(raw["Space available"])}" is not Owned, Rented or Not yet identified.` });
+    if (a.floor === null && String(raw["Floor"] ?? "").trim() !== "") errors.push({ sheet: "Applications", row, text: `${a.id}: floor "${String(raw["Floor"])}" is not Ground, Upper, Mall unit or Not known.` });
+    for (const c of a.cleaned ?? []) changes.push({ row, id: a.id, text: c });
     applications.push(a);
   }
-  if (skippedExample) messages.push("The example row from the template was skipped.");
+
+  // Blank answers per column, counted on the rows that were kept.
+  const kept = new Set(applications.map((a) => a.row));
+  const blanks = appRead.headers
+    .filter(Boolean)
+    .map((h) => ({ column: h, count: appRead.rows.filter((r) => kept.has(r.row) && String(r.raw[h] ?? "").trim() === "").length }))
+    .filter((b) => b.count > 0);
 
   const territories: Territory[] = [];
   const tSeen = new Set<string>();
-  for (const raw of terRaw) {
+  const pinOwner = new Map<string, string>();
+  for (const { row, raw } of terRead.rows) {
     const t = cleanTerritory(raw);
-    if (!t.id) continue;
+    if (!t.id) {
+      errors.push({ sheet: "Territories", row, text: "No Territory ID, so the row was skipped." });
+      continue;
+    }
     if (tSeen.has(t.id)) {
-      messages.push(`${t.id} appears more than once. The first one was kept.`);
+      errors.push({ sheet: "Territories", row, text: `${t.id} appears more than once. The first one was kept.` });
       continue;
     }
     tSeen.add(t.id);
-    territories.push(t);
-  }
-  const pinOwner = new Map<string, string>();
-  for (const t of territories)
     for (const p of t.pins) {
+      if (!/^\d{6}$/.test(p)) errors.push({ sheet: "Territories", row, text: `${t.id}: pin code "${p}" is not 6 digits.` });
       const owner = pinOwner.get(p);
-      if (owner && owner !== t.id) messages.push(`Pin code ${p} is listed in both ${owner} and ${t.id}. ${owner} is used.`);
+      if (owner && owner !== t.id) errors.push({ sheet: "Territories", row, text: `Pin code ${p} is listed in both ${owner} and ${t.id}. ${owner} is used.` });
       else pinOwner.set(p, t.id);
     }
+    if (String(raw["Open slots"] ?? "").trim() !== "" && !/^\d+$/.test(String(raw["Open slots"]).trim())) errors.push({ sheet: "Territories", row, text: `${t.id}: open slots "${String(raw["Open slots"])}" was read as ${t.slots}.` });
+    territories.push(t);
+  }
 
   let stores: Store[] = [];
+  let storeRows = 0;
   if (storeSheet) {
-    const storeRaw = sheetRows(storeSheet, "Store ID");
-    if (storeRaw) stores = storeRaw.map(cleanStore).filter((s) => s.id && /^\d{6}$/.test(s.pin));
+    const storeRead = sheetRows(storeSheet, "Store ID");
+    if (storeRead) {
+      storeRows = storeRead.rows.length;
+      for (const { row, raw } of storeRead.rows) {
+        const s = cleanStore(raw);
+        if (!s.id || !/^\d{6}$/.test(s.pin)) {
+          errors.push({ sheet: "Existing stores", row, text: `${s.id || "A store"}: pin code "${s.pin}" is not 6 digits, so the row was skipped.` });
+          continue;
+        }
+        stores.push(s);
+      }
+    }
   }
   if (stores.length === 0) {
     stores = EXISTING_STORES;
     messages.push("No existing stores were found in the file, so our current list of 10 stores was used.");
   }
-
   if (applications.length === 0) messages.push("No applications were found below the headings.");
   if (territories.length === 0) messages.push("No areas were found on the Territories sheet.");
+  if (exampleRow !== null) messages.push(`The template's example row (row ${exampleRow}) was skipped.`);
+  for (const e of errors) messages.push(`${e.sheet}, row ${e.row}: ${e.text}`);
+
+  const health: DataHealth = {
+    sheets: [
+      { name: "Applications", found: true, rows: applications.length },
+      { name: "Territories", found: true, rows: territories.length },
+      { name: "Existing stores", found: !!storeSheet, rows: stores.length },
+    ],
+    applicationRows: applications.length,
+    territoryRows: territories.length,
+    storeRows: stores.length,
+    exampleRowSkipped: exampleRow !== null,
+    exampleRow,
+    blanks,
+    changes,
+    errors,
+  };
   return {
     ok: true,
     applications,
     territories,
     stores,
     report: { applicationRows: applications.length, territoryRows: territories.length, storeRows: stores.length, messages },
+    health,
   };
 }

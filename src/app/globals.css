@@ -19,6 +19,9 @@
   --c-needs_info: #6b7280;
   --c-waiting: #2563eb;
   --c-not_eligible: #dc2626;
+  --c-redirected: #0f766e;
+  --c-not_in_plan: #78716c;
+  --c-withdrawn: #44403c;
   --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 24px rgba(31, 79, 216, 0.07);
 }
 
@@ -162,6 +165,9 @@ a {
   .s-needs_info { color: #3f4654; background: #e8ebf0; }
   .s-waiting { color: #1d3fc4; background: #e1e8ff; }
   .s-not_eligible { color: #b3001b; background: #ffe0dc; }
+  .s-redirected { color: #0b5d56; background: #d6f3ef; }
+  .s-not_in_plan { color: #57534e; background: #ece9e4; }
+  .s-withdrawn { color: #44403c; background: #f5f5f4; border-style: dashed; }
 
   /* Colour coding for rows, cards and dots. */
   .row-approved td:first-child { box-shadow: inset 4px 0 0 var(--c-approved); }
@@ -169,17 +175,26 @@ a {
   .row-needs_info td:first-child { box-shadow: inset 4px 0 0 var(--c-needs_info); }
   .row-waiting td:first-child { box-shadow: inset 4px 0 0 var(--c-waiting); }
   .row-not_eligible td:first-child { box-shadow: inset 4px 0 0 var(--c-not_eligible); }
+  .row-redirected td:first-child { box-shadow: inset 4px 0 0 var(--c-redirected); }
+  .row-not_in_plan td:first-child { box-shadow: inset 4px 0 0 var(--c-not_in_plan); }
+  .row-withdrawn td:first-child { box-shadow: inset 4px 0 0 var(--c-withdrawn); }
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
   .dot-approved { background: var(--c-approved); }
   .dot-conditional { background: var(--c-conditional); }
   .dot-needs_info { background: var(--c-needs_info); }
   .dot-waiting { background: var(--c-waiting); }
   .dot-not_eligible { background: var(--c-not_eligible); }
+  .dot-redirected { background: var(--c-redirected); }
+  .dot-not_in_plan { background: var(--c-not_in_plan); }
+  .dot-withdrawn { background: var(--c-withdrawn); }
   .tint-approved { background: #f1fbf5; border-color: #bfe8cf; }
   .tint-conditional { background: #fffaf0; border-color: #f4d9a0; }
   .tint-needs_info { background: #f6f7f9; border-color: #d9dde4; }
   .tint-waiting { background: #f3f6ff; border-color: #c9d6ff; }
   .tint-not_eligible { background: #fff5f4; border-color: #f6c6c0; }
+  .tint-redirected { background: #f0fbf9; border-color: #b6e3dd; }
+  .tint-not_in_plan { background: #f8f7f5; border-color: #dcd8d2; }
+  .tint-withdrawn { background: #fafafa; border-color: #d6d3d1; }
 
   .tag {
     display: inline-flex;

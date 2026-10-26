@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { dbEnabled, ping } from "@/lib/db";
+import { dbEnabled, ping } from "@/lib/runs";
 
 export const dynamic = "force-dynamic";
 
