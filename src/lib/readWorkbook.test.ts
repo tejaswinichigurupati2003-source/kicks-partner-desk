@@ -43,6 +43,12 @@ describe("reading the workbook", () => {
     const r = await read([row("APP-002")], { territories: [["TER-01", "Mysuru", "Karnataka", "570001, 570002, 570008", "Tier 2", 3, "High"]] });
     expect(r.territories).toHaveLength(1);
   });
+  it("replaces the template's example territory row when the real TER-01 is added below it", async () => {
+    const r = await read([row("APP-002")], { territories: [["TER-01", "Mysuru", "Karnataka", "570001, 570002, 570008", "Tier 2", 3, "High"], ["TER-01", "Mysuru", "Karnataka", "570001, 570003", "Tier 2", 2, "Medium"]] });
+    expect(r.territories).toHaveLength(1);
+    expect(r.territories[0].pins).toEqual(["570001", "570003"]);
+    expect(r.territories[0].slots).toBe(2);
+  });
   it("accepts blank optional fields and counts the blanks per column", async () => {
     const r = await read([row("APP-002", { 13: null, 9: null, 10: null, 8: "Not yet identified" }), row("APP-003", { 13: null })]);
     expect(r.applications).toHaveLength(2);

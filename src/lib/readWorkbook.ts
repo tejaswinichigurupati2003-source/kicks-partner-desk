@@ -79,6 +79,10 @@ function sheetRows(ws: ExcelJS.Worksheet, marker: string): SheetRead | null {
   return { headers, headerRow, rows };
 }
 
+function isTemplateTerritory(t: Territory): boolean {
+  return t.id === "TER-01" && t.city === "Mysuru" && t.pins.join(",") === "570001,570002,570008" && t.slots === 3 && t.priority === "High";
+}
+
 function findSheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet | undefined {
   return wb.worksheets.find((w) => w.name.trim().toLowerCase() === name.toLowerCase());
 }
@@ -159,8 +163,15 @@ export async function readWorkbook(buffer: Buffer, fileName: string): Promise<Re
       continue;
     }
     if (tSeen.has(t.id)) {
-      errors.push({ sheet: "Territories", row, text: `${t.id} appears more than once. The first one was kept.` });
-      continue;
+      // The template's own example row can be left in place with the real TER-01 below it: the real one wins.
+      const first = territories.findIndex((x) => x.id === t.id);
+      if (first >= 0 && isTemplateTerritory(territories[first])) {
+        territories.splice(first, 1);
+        errors.push({ sheet: "Territories", row, text: `The template's example row for ${t.id} was replaced by this row.` });
+      } else {
+        errors.push({ sheet: "Territories", row, text: `${t.id} appears more than once. The first one was kept.` });
+        continue;
+      }
     }
     tSeen.add(t.id);
     for (const p of t.pins) {

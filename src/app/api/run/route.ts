@@ -46,7 +46,7 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   if (!dbEnabled()) return NextResponse.json({ ok: false, reason: "off" });
-  if (!allow(`run:${clientKey(req)}`, 120, 60_000)) return NextResponse.json({ ok: false, reason: "busy" }, { status: 429 });
+  if (!allow(`run:${clientKey(req)}`, 600, 60_000)) return NextResponse.json({ ok: false, reason: "busy" }, { status: 429 });
   const text = await req.text();
   if (text.length > MAX_BYTES) return NextResponse.json({ ok: false, reason: "large" }, { status: 413 });
   let json: unknown;
@@ -82,7 +82,7 @@ export async function PUT(req: Request) {
  */
 export async function POST(req: Request) {
   if (!dbEnabled()) return NextResponse.json({ ok: false, error: "Saving is not available right now, so the file can't be added. Please try again in a moment." }, { status: 503 });
-  if (!allow(`import:${clientKey(req)}`, 20, 60_000)) return NextResponse.json({ ok: false, error: "That's a lot of uploads in a short time. Please wait a minute and try again." }, { status: 429 });
+  if (!allow(`import:${clientKey(req)}`, 60, 60_000)) return NextResponse.json({ ok: false, error: "That's a lot of uploads in a short time. Please wait a minute and try again." }, { status: 429 });
   const actor = actorOf(req);
   const url = new URL(req.url);
   const mode = url.searchParams.get("mode") === "add" ? "add" : "replace";
