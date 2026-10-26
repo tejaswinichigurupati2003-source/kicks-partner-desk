@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import * as Popover from "@radix-ui/react-popover";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useDesk } from "@/lib/desk";
 import { useAlerts } from "@/lib/alerts";
 import { STATUS_LABEL } from "@/engine/run";
@@ -65,6 +65,74 @@ function titleFor(path: string): string {
   return hit?.label ?? "Kicks Partner Desk";
 }
 
+/** A sidebar group the person can fold away. The choice is remembered in this browser only. */
+function Group({
+  id,
+  title,
+  summary,
+  children,
+}: {
+  id: string;
+  title: string;
+  summary?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem("kicks_nav_" + id) === "closed") setOpen(false);
+    } catch {}
+  }, [id]);
+  const toggle = () => {
+    setOpen((o) => {
+      try {
+        localStorage.setItem("kicks_nav_" + id, o ? "closed" : "open");
+      } catch {}
+      return !o;
+    });
+  };
+  return (
+    <section className="mt-5 first:mt-0">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        aria-controls={"nav-" + id}
+        className="mb-2 flex min-h-[32px] w-full items-center justify-between rounded-lg px-3 text-left text-xs font-bold uppercase tracking-wider text-muted hover:bg-[#f1f5fc]"
+      >
+        <span>{title}</span>
+        <span className="flex items-center gap-2">
+          {!open && summary && (
+            <span className="mono text-[11px] normal-case tracking-normal">
+              {summary}
+            </span>
+          )}
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{
+              transform: open ? "rotate(0deg)" : "rotate(-90deg)",
+              transition: "transform .15s",
+            }}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </span>
+      </button>
+      <div id={"nav-" + id} hidden={!open}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 function Nav({ items, active }: { items: typeof MENU; active: (href: string) => boolean }) {
   return (
     <ul className="space-y-1">
@@ -112,20 +180,22 @@ export function Shell({ children }: { children: ReactNode }) {
           <nav aria-label="Main">
             <p className="mb-2 px-3 text-xs font-bold uppercase tracking-wider text-muted">Menu</p>
             <Nav items={MENU} active={active} />
-            <p className="mb-2 mt-5 px-3 text-xs font-bold uppercase tracking-wider text-muted">By decision</p>
-            <ul className="space-y-1">
-              {STATUSES.map((s) => (
-                <li key={s}>
-                  <Link href={`/applications?status=${s}`} className="nav-item !min-h-[40px]">
-                    <span className={`dot dot-${s}`} aria-hidden="true" />
-                    <span className="flex-1 text-[14px]">{STATUS_LABEL[s]}</span>
-                    <span className="mono text-sm text-muted">{hasData ? count(s) : 0}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            <p className="mb-2 mt-5 px-3 text-xs font-bold uppercase tracking-wider text-muted">Workspace</p>
-            <Nav items={WORK} active={active} />
+            <Group id="decision" title="By decision" summary={hasData ? `${decisions.length} total` : undefined}>
+              <ul className="space-y-1">
+                {STATUSES.map((s) => (
+                  <li key={s}>
+                    <Link href={`/applications?status=${s}`} className="nav-item !min-h-[40px]">
+                      <span className={`dot dot-${s}`} aria-hidden="true" />
+                      <span className="flex-1 text-[14px]">{STATUS_LABEL[s]}</span>
+                      <span className="mono text-sm text-muted">{hasData ? count(s) : 0}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </Group>
+            <Group id="workspace" title="Workspace">
+              <Nav items={WORK} active={active} />
+            </Group>
           </nav>
           <div className="mt-auto pt-5">
             <div className="rounded-2xl p-4 text-white" style={{ background: "linear-gradient(160deg,#1f4fd8,#12306b)" }}>

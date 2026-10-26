@@ -138,7 +138,7 @@ export default function Overview() {
               See all areas
             </Link>
           </div>
-          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,1fr)_minmax(220px,250px)]">
             <div className="rounded-xl border border-soft-line bg-[#f4f8ff] p-2">
               <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Schematic map of Karnataka with our cities" className="w-full">
                 <polygon points={OUTLINE.map(([lo, la]) => `${px(lo)},${py(la)}`).join(" ")} fill="#e3ecfb" stroke="#b9c9e8" strokeWidth="2" strokeLinejoin="round" />
@@ -167,20 +167,26 @@ export default function Overview() {
             <div className="flex flex-col gap-3">
               {picked ? (
                 <div className="rounded-xl border border-soft-line p-4">
-                  <p className="text-lg font-bold">{picked.name}</p>
-                  <dl className="mt-2 grid grid-cols-2 gap-y-1 text-sm">
-                    <dt className="text-muted">Existing stores</dt>
-                    <dd className="mono">{picked.stores}</dd>
-                    <dt className="text-muted">Openings left</dt>
-                    <dd className="mono">
-                      {picked.left} of {picked.slots}
-                    </dd>
-                    <dt className="text-muted">Applicants</dt>
-                    <dd className="mono">{picked.applicants}</dd>
+                  <p className="text-lg font-bold leading-snug">{picked.name}</p>
+                  <dl className="mt-3 divide-y divide-soft-line text-sm">
+                    <div className="flex items-baseline justify-between gap-3 py-2">
+                      <dt className="text-muted">Existing stores</dt>
+                      <dd className="mono whitespace-nowrap font-bold">{picked.stores}</dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3 py-2">
+                      <dt className="text-muted">Openings left</dt>
+                      <dd className="mono whitespace-nowrap font-bold">
+                        {picked.left} of {picked.slots}
+                      </dd>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3 py-2">
+                      <dt className="text-muted">Applicants</dt>
+                      <dd className="mono whitespace-nowrap font-bold">{picked.applicants}</dd>
+                    </div>
                   </dl>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {ORDER.filter((s) => picked.by(s) > 0).map((s) => (
-                      <span key={s} className={`stamp stamp-flat s-${s}`}>
+                      <span key={s} className={`stamp stamp-flat s-${s} max-w-full !whitespace-normal`}>
                         {picked.by(s)} {STATUS_LABEL[s]}
                       </span>
                     ))}
