@@ -45,6 +45,17 @@ export default function ImportPage() {
     }
   }
 
+  async function loadPractice() {
+    setError(null);
+    try {
+      const blob = await (await fetch("/practice-applications.xlsx")).blob();
+      setMode("replace");
+      await upload(new File([blob], "practice-applications.xlsx", { type: blob.type }));
+    } catch {
+      setError("We couldn't load the practice data. Please try again.");
+    }
+  }
+
   return (
     <>
       <PageHeader title="Import applications" intro="Bring in your applications and the areas you want to grow in from one Excel file. You'll get a decision and a reason for every applicant." />
@@ -116,6 +127,13 @@ export default function ImportPage() {
             <a className="btn btn-ghost" href="/api/template" download>
               Download template
             </a>
+          </Card>
+          <Card className="p-5">
+            <SectionTitle>Want to look around first?</SectionTitle>
+            <p className="mb-4 text-muted">Fill your workspace with 19 practice applicants, 8 areas and our 10 stores. It replaces what is in your workspace now.</p>
+            <button className="btn btn-ghost" disabled={busy} onClick={() => void loadPractice()}>
+              Load practice data
+            </button>
           </Card>
           <Card className="p-5">
             <SectionTitle>Your data</SectionTitle>
