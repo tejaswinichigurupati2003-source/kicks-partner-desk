@@ -36,8 +36,12 @@ export async function GET() {
 export async function POST(req: Request) {
   if (!dbEnabled()) return NextResponse.json({ ok: false, reason: "off", text: "Saving isn't available right now, so the assistant can't save changes. Please try again in a moment." });
   if (!allow(`chat:${clientKey(req)}`, 120, 60_000)) return NextResponse.json({ ok: false, reason: "busy", text: "Too many questions in a short time. Please wait a minute." }, { status: 429 });
-  const parsed = Body.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ ok: false, reason: "invalid", text: "Please type a question." }, { status: 400 });
+  const body = await req.json().catch(() => null);
+  const parsed = Body.safeParse(body);
+  if (!parsed.success) {
+    const long = typeof (body as { message?: unknown } | null)?.message === "string" && (body as { message: string }).message.trim().length > 800;
+    return NextResponse.json({ ok: false, reason: "invalid", text: long ? "That message is a bit long for me. Please keep it under 800 characters, or split it into two questions." : "Please type a question." }, { status: 400 });
+  }
   const runId = await readRunId();
   if (!runId) return NextResponse.json({ ok: true, reply: { text: "There are no applications in this run yet. Import a spreadsheet first, then ask me about any applicant.", cards: [] }, ai: false });
   try {
