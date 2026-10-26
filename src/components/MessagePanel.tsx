@@ -3,11 +3,12 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import { useState } from "react";
 import { buildMessage, wordCount } from "@/engine/messages";
+import type { Assumptions } from "@/engine/config";
 import type { Application, Decision, Language } from "@/engine/types";
 
 const LANGS: Language[] = ["English", "Kannada", "Hindi"];
 
-export function MessagePanel({ app, decision, link, now }: { app: Application; decision: Decision; link?: string; now: Date }) {
+export function MessagePanel({ app, decision, link, now, assumptions }: { app: Application; decision: Decision; link?: string; now: Date; assumptions?: Assumptions }) {
   const [copied, setCopied] = useState<string | null>(null);
   const copy = async (text: string, lang: string) => {
     try {
@@ -25,8 +26,7 @@ export function MessagePanel({ app, decision, link, now }: { app: Application; d
           <Tabs.Trigger
             key={l}
             value={l}
-            className="min-h-[44px] rounded-md border-2 border-ink px-4 font-bold data-[state=active]:bg-lime"
-            style={{ background: "var(--surface)" }}
+            className="min-h-[44px] rounded-full border border-[#cdd6e6] bg-white px-4 font-semibold data-[state=active]:border-cobalt data-[state=active]:bg-[#e8efff]"
           >
             {l}
             {l === app.language ? " (applicant's)" : ""}
@@ -34,7 +34,7 @@ export function MessagePanel({ app, decision, link, now }: { app: Application; d
         ))}
       </Tabs.List>
       {LANGS.map((l) => {
-        const text = buildMessage(app, decision, l, { now, link: link ?? "(link is being created…)" });
+        const text = buildMessage(app, decision, l, { now, link: link ?? "(link is being created…)", assumptions });
         return (
           <Tabs.Content key={l} value={l}>
             <div className="prose-msg indic rounded-md border-2 border-soft-line bg-box p-4" lang={l === "Kannada" ? "kn" : l === "Hindi" ? "hi" : "en"} style={{ overflowWrap: "anywhere" }}>

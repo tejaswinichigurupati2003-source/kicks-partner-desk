@@ -1,17 +1,14 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
-import { answer, answerWithChange, type PendingChange, type Reply } from "@/engine/assistant";
-import type { Change } from "@/engine/rerun";
-import { STATUS_LABEL } from "@/engine/run";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { DiffCardView } from "@/components/DiffCardView";
+import type { DiffCard } from "@/lib/diffcard";
 import { useDesk } from "@/lib/desk";
 
 interface Msg {
-  from: "team" | "assistant";
-  text?: string;
-  reply?: Reply;
-  saved?: boolean;
+  role: "user" | "assistant";
+  text: string;
+  cards?: DiffCard[];
 }
 
 function bold(text: string): ReactNode[] {
@@ -45,65 +42,77 @@ export function Lines({ lines }: { lines: string[] }) {
   return <div className="space-y-1 text-[15px]">{out}</div>;
 }
 
-const SUGGESTIONS = ["Which five should we start with?", "Show everyone who needs information", "Which areas are full?"];
+const SUGGESTIONS = ["Why is APP-005 approved at 32 while APP-003 at 87 is waitlisted?", "APP-002 has withdrawn", "APP-012 found a 450 sq ft ground-floor rented shop", "Add one opening to TER-03", "Which areas are full?"];
+const DOCK = 440;
 
 export function Assistant() {
   const desk = useDesk();
   const [open, setOpen] = useState(false);
+  const [desktop, setDesktop] = useState(false);
   const [text, setText] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
-  const [pending, setPending] = useState<PendingChange | null>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-
   const [busy, setBusy] = useState(false);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  /** Decision facts only: application numbers, statuses and reasons. No names or applicant-written text leave the browser. */
-  const factsFor = (q: string) => {
-    const mentioned = new Set((q.match(/app[-\s]?0*\d+/gi) ?? []).map((m) => parseInt(m.replace(/\D/g, ""), 10)));
-    const all = desk.ws.applications.filter((a) => desk.result.decisions[a.id]);
-    const pick = all.filter((a) => mentioned.has(parseInt(a.id.replace(/\D/g, ""), 10)));
-    const rest = all.filter((a) => !pick.includes(a)).slice(0, Math.max(0, 60 - pick.length));
-    const counts: Record<string, number> = {};
-    for (const d of Object.values(desk.result.decisions)) counts[STATUS_LABEL[d.status]] = (counts[STATUS_LABEL[d.status]] ?? 0) + 1;
-    return {
-      counts,
-      areas: desk.result.territories.map((t) => ({ id: t.territory.id, city: t.territory.city, openings: t.territory.slots, left: t.openingsLeft, waiting: t.waiting.length })),
-      facts: [...pick, ...rest].map((a) => {
-        const d = desk.result.decisions[a.id];
-        return { id: a.id, status: STATUS_LABEL[d.status], verdict: d.verdict, reasons: d.reasons.slice(0, 8), checks: d.checks.slice(0, 8), score: d.score, area: d.territoryId, position: d.position, ahead: d.ahead.slice(0, 30), ask: d.ask ?? null };
-      }),
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const set = () => setDesktop(mq.matches);
+    set();
+    mq.addEventListener("change", set);
+    return () => mq.removeEventListener("change", set);
+  }, []);
+
+  // On desktop the panel sits beside the page, so the page keeps its own space and stays usable.
+  useEffect(() => {
+    if (!(open && desktop)) return;
+    const prev = document.body.style.paddingRight;
+    document.body.style.paddingRight = `${DOCK}px`;
+    document.body.style.transition = "padding-right 0.15s ease-out";
+    return () => {
+      document.body.style.paddingRight = prev;
     };
-  };
+  }, [open, desktop]);
+
+  // Load the conversation for this run when the panel opens.
+  useEffect(() => {
+    if (!open || !desk.runId || loadedFor === desk.runId) return;
+    setLoadedFor(desk.runId);
+    fetch("/api/chat", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { ok: boolean; messages?: { role: "user" | "assistant"; text: string; cards?: DiffCard[] }[] }) => {
+        if (j.ok && j.messages) setMsgs(j.messages.map((m) => ({ role: m.role, text: m.text, cards: m.cards ?? [] })));
+      })
+      .catch(() => undefined);
+  }, [open, desk.runId, loadedFor]);
+
+  useEffect(() => {
+    if (open) {
+      inputRef.current?.focus();
+      endRef.current?.scrollIntoView({ block: "end" });
+    }
+  }, [open, msgs, busy]);
 
   const send = async (q: string) => {
-    if (!q.trim() || busy) return;
-    const ctx = { input: { applications: desk.ws.applications, territories: desk.ws.territories, stores: desk.ws.stores, overrides: desk.ws.overrides }, result: desk.result, now: desk.now };
-    let reply = answer(q, ctx, pending);
+    const message = q.trim();
+    if (!message || busy) return;
     setText("");
-    setMsgs((m) => [...m, { from: "team", text: q }]);
-    if (reply.needsAi && desk.hasData) {
-      setBusy(true);
-      try {
-        const res = await fetch("/api/assistant", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ task: reply.needsAi.task, question: q.slice(0, 600), id: reply.needsAi.id, ...factsFor(q) }),
-        });
-        const data = (await res.json()) as { ok: boolean; answer?: string; changes?: Change; needs_clarification?: string };
-        if (data.ok && reply.needsAi.task === "ask" && data.answer) reply = { lines: data.answer.split("\n") };
-        else if (data.ok && reply.needsAi.task === "parseChange" && reply.needsAi.id) {
-          if (data.changes && Object.keys(data.changes).length) reply = answerWithChange(reply.needsAi.id, data.changes, ctx, pending);
-          else if (data.needs_clarification) reply = { lines: [data.needs_clarification] };
-        }
-      } catch {
-        /* the standard wording stays */
-      } finally {
-        setBusy(false);
-      }
+    setMsgs((m) => [...m, { role: "user", text: message }]);
+    setBusy(true);
+    try {
+      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "x-actor": encodeURIComponent(desk.actor) }, body: JSON.stringify({ message }) });
+      const j = (await res.json()) as { ok: boolean; text?: string; reply?: { text: string; cards: DiffCard[] } };
+      if (j.ok && j.reply) {
+        const cards = j.reply.cards ?? [];
+        setMsgs((m) => [...m, { role: "assistant", text: j.reply!.text, cards }]);
+        if (cards.length) await desk.receiveCard(cards[cards.length - 1]);
+      } else setMsgs((m) => [...m, { role: "assistant", text: j.text ?? "Something went wrong. Nothing was lost. Please try again." }]);
+    } catch {
+      setMsgs((m) => [...m, { role: "assistant", text: "We couldn't reach the assistant. Please check your connection and try again." }]);
+    } finally {
+      setBusy(false);
     }
-    setPending(reply.pending ?? null);
-    setMsgs((m) => [...m, { from: "assistant", reply }]);
-    setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
   };
 
   const submit = (e: FormEvent) => {
@@ -111,82 +120,77 @@ export function Assistant() {
     void send(text);
   };
 
-  const save = (index: number) => {
-    const m = msgs[index];
-    const w = m.reply?.whatIf;
-    if (!w || w.missing.length) return;
-    const parts = Object.entries(w.change).map(([k, v]) => `${k} ${v}`).join(", ");
-    desk.saveChange(w.id, w.change, `New information saved: ${parts}.`);
-    setMsgs((all) => all.map((x, i) => (i === index ? { ...x, saved: true } : x)));
-    setPending(null);
-  };
+  if (!open)
+    return (
+      <button className="btn fixed bottom-[72px] right-4 z-40 lg:bottom-6 lg:right-6" aria-label="Open the assistant" aria-expanded={false} onClick={() => setOpen(true)}>
+        Ask assistant
+      </button>
+    );
 
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Trigger asChild>
-        <button className="btn fixed bottom-[72px] right-4 z-40 lg:bottom-6 lg:right-6" aria-label="Ask the assistant">
-          Ask assistant
+    <aside
+      role="complementary"
+      aria-label="Assistant"
+      onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+      className="fixed inset-x-0 bottom-0 z-40 flex h-[78vh] flex-col rounded-t-2xl border-t border-soft-line bg-box shadow-[0_-8px_30px_rgba(16,24,40,0.15)] lg:inset-y-0 lg:left-auto lg:right-0 lg:h-auto lg:rounded-none lg:border-l lg:border-t-0 lg:shadow-none"
+      style={desktop ? { width: DOCK } : undefined}
+    >
+      <div className="flex items-center justify-between border-b border-soft-line bg-white px-4 py-3">
+        <div>
+          <h2 className="text-[18px] font-bold leading-tight">Assistant</h2>
+          <p className="text-xs text-muted">Answers from the stored decisions. Saves what you tell it.</p>
+        </div>
+        <button className="min-h-[44px] min-w-[44px] text-2xl" aria-label="Close the assistant" onClick={() => setOpen(false)}>
+          ×
         </button>
-      </Dialog.Trigger>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-ink/40" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className="fixed bottom-0 right-0 top-0 z-50 flex w-full max-w-[460px] flex-col border-l-2 border-ink bg-box shadow-[-6px_0_0_#111]"
-        >
-          <div className="flex items-center justify-between border-b-2 border-ink bg-ink px-4 py-3 text-white">
-            <Dialog.Title className="font-display-up text-[16px] leading-tight">Ask assistant</Dialog.Title>
-            <Dialog.Close className="min-h-[44px] min-w-[44px] text-2xl text-white" aria-label="Close">
-              ×
-            </Dialog.Close>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto p-4" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversation">
+        {msgs.length === 0 && (
+          <div className="space-y-3">
+            <p>Ask why someone got a decision, compare two applicants, or tell me new information. Changes are saved and everyone in the area is re-checked.</p>
+            <div className="flex flex-wrap gap-2">
+              {SUGGESTIONS.map((s) => (
+                <button key={s} className="min-h-[44px] rounded-full border border-[#cdd6e6] bg-white px-3 text-left text-sm font-semibold" onClick={() => void send(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex-1 space-y-4 overflow-y-auto p-4" aria-live="polite">
-            {msgs.length === 0 && (
-              <div className="space-y-3">
-                <p>Ask why someone got a decision, who is ahead of them, or what happens if something changes.</p>
-                <p className="text-muted">For example: “Why is APP-007 on the waiting list?” or “APP-012 found a ground-floor shop.”</p>
-                <div className="flex flex-wrap gap-2">
-                  {SUGGESTIONS.map((s) => (
-                    <button key={s} className="btn btn-ghost btn-small" onClick={() => void send(s)}>
-                      {s}
-                    </button>
-                  ))}
-                </div>
+        )}
+        {msgs.map((m, i) =>
+          m.role === "user" ? (
+            <div key={i} className="ml-8 rounded-2xl rounded-br-sm bg-[#e8efff] p-3 font-semibold">
+              {m.text}
+            </div>
+          ) : (
+            <div key={i} className="mr-2 space-y-3">
+              <div className="card p-3">
+                <Lines lines={m.text.split("\n")} />
               </div>
-            )}
-            {msgs.map((m, i) =>
-              m.from === "team" ? (
-                <div key={i} className="ml-8 rounded-md border-2 border-ink bg-lime p-3 font-semibold">
-                  {m.text}
-                </div>
-              ) : (
-                <div key={i} className="card mr-4 p-3">
-                  <Lines lines={m.reply!.lines} />
-                  {m.reply!.whatIf && m.reply!.whatIf.rows.length > 0 && (
-                    <div className="mt-3 border-t-2 border-soft-line pt-3">
-                      <button className="btn btn-small" disabled={m.saved || m.reply!.whatIf.missing.length > 0} onClick={() => save(i)}>
-                        {m.saved ? "Saved" : "Save this change"}
-                      </button>
-                      {m.reply!.whatIf.missing.length > 0 && <p className="mt-2 text-sm text-muted">Add the missing detail first.</p>}
-                    </div>
-                  )}
-                </div>
-              ),
-            )}
-            {busy && <p className="text-muted">Looking at the decisions…</p>}
-            <div ref={endRef} />
-          </div>
-          <form onSubmit={submit} className="flex gap-2 border-t-2 border-ink bg-surface p-3">
-            <label htmlFor="ask" className="sr-only">
-              Your question
-            </label>
-            <input id="ask" className="field" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask about an applicant…" autoComplete="off" />
-            <button className="btn btn-small" type="submit">
-              Ask
-            </button>
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+              {(m.cards ?? []).map((c, j) => (
+                <DiffCardView key={j} card={c} />
+              ))}
+            </div>
+          ),
+        )}
+        {busy && (
+          <p className="text-muted" role="status">
+            Looking at the decisions…
+          </p>
+        )}
+        <div ref={endRef} />
+      </div>
+
+      <form onSubmit={submit} className="flex gap-2 border-t border-soft-line bg-white p-3">
+        <label htmlFor="ask" className="sr-only">
+          Your question or new information
+        </label>
+        <input id="ask" ref={inputRef} className="field" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask, or tell me what changed…" autoComplete="off" maxLength={800} />
+        <button className="btn btn-small" type="submit" disabled={busy || !text.trim()}>
+          Send
+        </button>
+      </form>
+    </aside>
   );
 }

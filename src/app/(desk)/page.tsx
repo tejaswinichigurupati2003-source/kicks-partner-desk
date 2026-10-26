@@ -1,22 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDesk } from "@/lib/desk";
 import { useAlerts } from "@/lib/alerts";
 import { STATUS_LABEL } from "@/engine/run";
 import type { Status } from "@/engine/types";
 import { Card, EmptyState, ErrorBanner, ImportButton, Loading, PageHeader, StatusStamp } from "@/components/ui";
 
-const ORDER: Status[] = ["approved", "conditional", "needs_info", "waiting", "not_eligible"];
-const COLOR: Record<Status, string> = { approved: "#16a34a", conditional: "#d97706", needs_info: "#6b7280", waiting: "#2563eb", not_eligible: "#dc2626" };
+const ORDER: Status[] = ["approved", "conditional", "redirected", "waiting", "needs_info", "not_in_plan", "not_eligible", "withdrawn"];
+const COLOR: Record<Status, string> = { approved: "#16a34a", conditional: "#b45309", redirected: "#0f766e", waiting: "#2563eb", needs_info: "#4b5563", not_in_plan: "#57534e", not_eligible: "#dc2626", withdrawn: "#44403c" };
 const HINT: Record<Status, string> = {
   approved: "Got an opening",
-  conditional: "Opening held 30 days",
+  conditional: "Opening held",
+  redirected: "Offered another pin",
+  waiting: "Waiting for an opening",
   needs_info: "Waiting on a reply",
-  waiting: "Ahead of them: others",
+  not_in_plan: "Outside the plan",
   not_eligible: "Rule not met",
+  withdrawn: "Left the process",
 };
+
+interface EventLine {
+  id: number;
+  group_id: string;
+  application_id: string | null;
+  trigger: string;
+  actor: string;
+  summary: string;
+  at: string;
+}
 
 // Approximate positions (longitude, latitude) of our cities, for the schematic map.
 const POS: Record<string, [number, number]> = {
@@ -41,6 +54,24 @@ export default function Overview() {
   const { ready, hasData, result, ws } = useDesk();
   const { alerts } = useAlerts();
   const [city, setCity] = useState<string | null>(null);
+  const [events, setEvents] = useState<EventLine[]>([]);
+  const runKey = useDesk().runId;
+  useEffect(() => {
+    if (!runKey) return;
+    let off = false;
+    fetch("/api/run/events?limit=40", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { events?: EventLine[] }) => {
+        if (off) return;
+        const seen = new Set<string>();
+        const heads = (j.events ?? []).filter((e) => e.application_id === null && !seen.has(e.group_id) && seen.add(e.group_id));
+        setEvents(heads.slice(0, 6));
+      })
+      .catch(() => undefined);
+    return () => {
+      off = true;
+    };
+  }, [runKey, ws.applications.length]);
 
   const cities = useMemo(() => {
     const names = Array.from(new Set([...ws.territories.map((t) => t.city), ...ws.stores.map((s) => s.city), ...ws.applications.map((a) => a.city)])).filter((c) => POS[c]);
@@ -73,13 +104,13 @@ export default function Overview() {
   const count = (s: Status) => decisions.filter((d) => d.status === s).length;
   const picked = cities.find((c) => c.name === city) ?? null;
   const stateColor = (s: string) => (s === "full" ? "#dc2626" : s === "filling" ? "#d97706" : s === "open" ? "#16a34a" : "#9aa3b5");
-  const recent = ws.log.slice(0, 6);
+  const recent = events;
 
   return (
     <>
       {result.problems.length > 0 && <ErrorBanner>We found a problem in the results and have not shown them. Please import the file again.</ErrorBanner>}
 
-      <section aria-label="Totals" className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+      <section aria-label="Totals" className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
         {ORDER.map((s) => (
           <Link key={s} href={`/applications?status=${s}`} className="card card-link p-4">
             <div className="flex items-start justify-between gap-2">
@@ -99,7 +130,7 @@ export default function Overview() {
         ))}
       </section>
 
-      <div className="mb-5 grid gap-5 xl:grid-cols-[1.5fr_1fr]">
+      <div className="mb-5 grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display-up text-[18px] leading-tight">Areas overview</h2>
@@ -107,7 +138,7 @@ export default function Overview() {
               See all areas
             </Link>
           </div>
-          <div className="grid gap-4 md:grid-cols-[360px_1fr]">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
             <div className="rounded-xl border border-soft-line bg-[#f4f8ff] p-2">
               <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Schematic map of Karnataka with our cities" className="w-full">
                 <polygon points={OUTLINE.map(([lo, la]) => `${px(lo)},${py(la)}`).join(" ")} fill="#e3ecfb" stroke="#b9c9e8" strokeWidth="2" strokeLinejoin="round" />
@@ -197,7 +228,7 @@ export default function Overview() {
         </Card>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-5 lg:grid-cols-2">
         <Card className="p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-display-up text-[18px] leading-tight">Start with these</h2>
@@ -236,20 +267,15 @@ export default function Overview() {
         <Card className="p-5">
           <h2 className="font-display-up mb-3 text-[18px] leading-tight">Recent activity</h2>
           {recent.length === 0 ? (
-            <p className="text-muted">Changes, new information and imports show up here as the team works.</p>
+            <p className="text-muted">Imports, chat updates, assumption changes and manual decisions show up here as the team works.</p>
           ) : (
             <ul className="space-y-3">
-              {recent.map((l, i) => (
-                <li key={i} className="flex gap-3 rounded-xl border border-soft-line p-3">
-                  <span className="dot mt-1.5" style={{ background: l.kind === "decision" ? "#d97706" : l.kind === "change" ? "#2563eb" : "#16a34a" }} aria-hidden="true" />
+              {recent.map((l) => (
+                <li key={l.group_id} className="flex gap-3 rounded-xl border border-soft-line p-3">
+                  <span className="dot mt-1.5" style={{ background: l.trigger === "override" ? "#b45309" : l.trigger === "chat" ? "#2563eb" : l.trigger === "assumption" ? "#0f766e" : "#16a34a" }} aria-hidden="true" />
                   <span className="min-w-0 flex-1 text-sm">
-                    {l.id && (
-                      <Link href={`/applications/${l.id}`} className="mono mr-1 font-bold">
-                        {l.id}
-                      </Link>
-                    )}
-                    {l.text}
-                    <span className="mt-0.5 block text-xs text-muted">{new Date(l.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                    {l.summary}
+                    <span className="mt-0.5 block text-xs text-muted">{l.actor} · {new Date(l.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
                   </span>
                 </li>
               ))}

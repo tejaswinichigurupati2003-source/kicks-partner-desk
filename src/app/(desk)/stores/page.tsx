@@ -11,12 +11,13 @@ export default function Stores() {
       <PageHeader title="Our stores" intro={`The ${ws.stores.length} Kicks stores open today. We never open a second store in the same pin code, so these pin codes are taken.`} />
       <Card className="overflow-x-auto">
         <table className="desk-table">
+          <caption className="sr-only">Our Kicks stores and their pin codes</caption>
           <thead>
             <tr>
-              <th>Store</th>
-              <th>City</th>
-              <th>Pin code</th>
-              <th>Opened</th>
+              <th scope="col">Store</th>
+              <th scope="col">City</th>
+              <th scope="col">Pin code</th>
+              <th scope="col">Opened</th>
             </tr>
           </thead>
           <tbody>

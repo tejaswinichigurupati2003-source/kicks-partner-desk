@@ -5,10 +5,11 @@ import { useMemo, useState } from "react";
 import { useDesk } from "@/lib/desk";
 import { Card, EmptyState, ImportButton, Loading, PageHeader, SectionTitle, StatusStamp } from "@/components/ui";
 
-type Kind = "pin" | "missing" | "notes" | "instructions" | "launch" | "space" | "duplicate" | "update";
+type Kind = "pin" | "missing" | "notes" | "instructions" | "launch" | "space" | "duplicate" | "update" | "money";
 const KIND_LABEL: Record<Kind, string> = {
   pin: "Pin code problems",
   missing: "Missing answers",
+  money: "Investment gap",
   notes: "Notes disagree with the form",
   instructions: "Instructions in notes (ignored)",
   launch: "Launch target too early",
@@ -17,12 +18,15 @@ const KIND_LABEL: Record<Kind, string> = {
   update: "Suggested updates to confirm",
 };
 
-function classify(text: string): Kind {
-  if (/pin code/i.test(text)) return "pin";
+function classify(check: string, text: string): Kind {
   if (/instructions that were ignored/i.test(text)) return "instructions";
-  if (/earlier than the realistic|target launch was not/i.test(text)) return "launch";
-  if (/notes (describe|say|mention)|form says/i.test(text)) return "notes";
-  if (/floor|space|size/i.test(text)) return "space";
+  if (check === "Pin and city") return "pin";
+  if (check === "Required answers") return "missing";
+  if (check === "Investment") return "money";
+  if (check === "Timeline" || /earlier than the realistic|target launch was not/i.test(text)) return "launch";
+  if (check === "Space details") return "space";
+  if (check === "Notes" && /Suggested update/i.test(text)) return "update";
+  if (check === "Notes") return "notes";
   return "missing";
 }
 
@@ -35,14 +39,12 @@ export default function DataReview() {
     for (const a of ws.applications) {
       const d = result.decisions[a.id];
       if (!d) continue;
-      if (d.status === "needs_info")
-        for (const r of d.reasons) {
-          const text = r.replace(/^Missing or unclear answer: /, "");
-          list.push({ id: a.id, name: a.name, kind: classify(text), text, blocking: true });
-        }
       if (d.duplicateOf) list.push({ id: a.id, name: a.name, kind: "duplicate", text: `Same name and pin code as ${d.duplicateOf}. The stronger application is used.`, blocking: true });
-      for (const c of d.checks) if (!/nearby store|loan or extra funds|30-month target/i.test(c)) list.push({ id: a.id, name: a.name, kind: classify(c), text: c, blocking: false });
-      for (const s of d.suggestions) list.push({ id: a.id, name: a.name, kind: "update", text: s, blocking: false });
+      for (const t of d.reasonTrail) {
+        if (t.result === "fail" && ["Pin and city", "Required answers", "Investment"].includes(t.check)) list.push({ id: a.id, name: a.name, kind: classify(t.check, t.detail), text: t.detail, blocking: true });
+        else if (t.result === "warn" && !["Nearby store", "Payback", "Condition"].includes(t.check)) list.push({ id: a.id, name: a.name, kind: classify(t.check, t.detail), text: t.detail, blocking: false });
+        else if (t.result === "info" && t.check === "Notes") list.push({ id: a.id, name: a.name, kind: "update", text: t.detail, blocking: false });
+      }
     }
     return list;
   }, [ws.applications, result]);
@@ -65,11 +67,12 @@ export default function DataReview() {
   const areaNoApplicants = result.territories.filter((t) => t.applicants.length === 0);
   const storePinApplicants = ws.applications.filter((a) => ws.stores.some((s) => s.pin === a.pin));
   const outside = ws.applications.filter((a) => /^\d{6}$/.test(a.pin) && !ws.territories.some((t) => t.pins.includes(a.pin)));
+  const health = ws.health;
 
   return (
     <>
       <PageHeader title="Data review" intro={intro} />
-      <section className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+      <section className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4" aria-label="Totals">
         {[
           ["Applications read", total],
           ["Clean", clean],
@@ -85,13 +88,25 @@ export default function DataReview() {
         ))}
       </section>
 
-      <div className="mb-8 grid gap-6 md:grid-cols-2">
+      <div className="mb-8 grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">
         <Card className="p-5">
           <SectionTitle>File check</SectionTitle>
           <p className="mb-2">
             {ws.fileName ?? "Your import"}: {total} applications, {ws.territories.length} areas, {ws.stores.length} existing stores.
           </p>
-          {ws.report.length === 0 ? (
+          {health ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm">
+              <li>{health.exampleRowSkipped ? `The template's example row (row ${health.exampleRow}) was skipped.` : "No example row was found."}</li>
+              <li>{health.changes.length} value(s) were changed while cleaning.</li>
+              <li>
+                {health.errors.length} error(s) in the file
+                {health.errors.length ? `: ${["Applications", "Territories", "Existing stores"].map((s) => `${health.errors.filter((e) => e.sheet === s).length} on ${s}`).join(", ")}` : ""}.
+              </li>
+              <li>
+                <Link href="/import">See the full data health report</Link>
+              </li>
+            </ul>
+          ) : ws.report.length === 0 ? (
             <p>Nothing was skipped or changed while reading the file.</p>
           ) : (
             <ul className="list-disc space-y-1 pl-5 text-sm">
@@ -105,11 +120,11 @@ export default function DataReview() {
           <SectionTitle>Areas and pin codes</SectionTitle>
           <ul className="list-disc space-y-1 pl-5 text-sm">
             <li>
-              {storePinApplicants.length} applicant(s) applied for a pin code that already has a store
+              {storePinApplicants.length} applicant(s) asked for a pin code that already has a store
               {storePinApplicants.length ? `: ${storePinApplicants.map((a) => a.id).join(", ")}` : ""}.
             </li>
             <li>
-              {outside.length} applicant(s) applied outside every area{outside.length ? `: ${outside.map((a) => a.id).join(", ")}` : ""}.
+              {outside.length} applicant(s) asked for a pin code outside every area{outside.length ? `: ${outside.map((a) => a.id).join(", ")}` : ""}.
             </li>
             <li>
               {areaNoApplicants.length} area(s) have no applicants{areaNoApplicants.length ? `: ${areaNoApplicants.map((t) => t.territory.id).join(", ")}` : ""}.
@@ -124,28 +139,29 @@ export default function DataReview() {
       ) : (
         <>
           <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter by kind">
-            <button className="min-h-[44px] rounded-md border border-[#cdd6e6] px-3 font-semibold" aria-pressed={kind === "all"} style={{ background: kind === "all" ? "#e8efff" : "var(--surface)" }} onClick={() => setKind("all")}>
+            <button className="min-h-[44px] rounded-full border px-4 font-semibold" aria-pressed={kind === "all"} style={{ background: kind === "all" ? "#e8efff" : "#fff", borderColor: kind === "all" ? "#1f4fd8" : "#cdd6e6" }} onClick={() => setKind("all")}>
               All ({issues.length})
             </button>
             {counts.map(([k, n]) => (
-              <button key={k} className="min-h-[44px] rounded-md border border-[#cdd6e6] px-3 font-semibold" aria-pressed={kind === k} style={{ background: kind === k ? "#e8efff" : "var(--surface)" }} onClick={() => setKind(k)}>
+              <button key={k} className="min-h-[44px] rounded-full border px-4 font-semibold" aria-pressed={kind === k} style={{ background: kind === k ? "#e8efff" : "#fff", borderColor: kind === k ? "#1f4fd8" : "#cdd6e6" }} onClick={() => setKind(k)}>
                 {KIND_LABEL[k]} ({n})
               </button>
             ))}
           </div>
           <Card className="overflow-x-auto">
             <table className="desk-table">
+              <caption className="sr-only">Things found in the file, by applicant</caption>
               <thead>
                 <tr>
-                  <th>Decision</th>
-                  <th>Applicant</th>
-                  <th>Kind</th>
-                  <th>What we found</th>
+                  <th scope="col">Decision</th>
+                  <th scope="col">Applicant</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">What we found</th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((i, n) => (
-                  <tr key={n}>
+                  <tr key={n} className={`row-${result.decisions[i.id].status}`}>
                     <td>
                       <StatusStamp status={result.decisions[i.id].status} flat />
                     </td>

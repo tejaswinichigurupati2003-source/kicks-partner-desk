@@ -1,7 +1,8 @@
 "use client";
 
 import { useDesk } from "@/lib/desk";
-import { STAGES } from "@/engine/plans";
+import { STAGE_DEFS } from "@/engine/plans";
+import { HOLDS_OPENING } from "@/engine/run";
 import { STATUS_LABEL } from "@/engine/run";
 import type { Status } from "@/engine/types";
 import { Bar, Card, EmptyState, ImportButton, Loading, PageHeader, SectionTitle } from "@/components/ui";
@@ -20,7 +21,7 @@ export default function Insights() {
   const decisions = Object.values(result.decisions);
   const total = decisions.length;
   const count = (s: Status) => decisions.filter((d) => d.status === s).length;
-  const approved = decisions.filter((d) => d.status === "approved" || d.status === "conditional");
+  const approved = decisions.filter((d) => HOLDS_OPENING.includes(d.status));
   const stageDone = (key: string) => approved.filter((d) => ws.stages[d.id]?.[key] === "Done").length;
   const decided = Object.keys(ws.overrides).length;
   const thin = result.territories.filter((t) => t.applicants.length < t.territory.slots);
@@ -28,14 +29,14 @@ export default function Insights() {
   return (
     <>
       <PageHeader title="Insights" intro={intro} />
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
         <section>
           <SectionTitle>Progress from application to opening</SectionTitle>
           <Card className="space-y-4 p-5">
             {[
               ["Applications received", total],
-              ["Approved to proceed or with a condition", approved.length],
-              ...STAGES.filter((s) => [1, 2, 3, 4, 5, 9].includes(s.n)).map((s) => [`Done: ${s.name}`, stageDone(s.key)] as [string, number]),
+              ["Given an opening (approved, with a condition, or redirected)", approved.length],
+              ...STAGE_DEFS.map((s) => [`Done: ${s.name}`, stageDone(s.key)] as [string, number]),
             ].map(([label, n]) => (
               <div key={label as string}>
                 <div className="flex justify-between text-sm font-semibold">
@@ -74,10 +75,10 @@ export default function Insights() {
                     {r.territory.id} · {r.territory.city}
                   </span>
                   <span className="mono">
-                    {r.approved.length}/{r.territory.slots} · {r.waiting.length} waiting
+                    {r.approved.length + r.redirected.length}/{r.territory.slots} · {r.waiting.length} waiting
                   </span>
                 </div>
-                <Bar value={r.approved.length} max={r.territory.slots} label={`${r.approved.length} of ${r.territory.slots} openings used`} />
+                <Bar value={r.approved.length + r.redirected.length} max={r.territory.slots} label={`${r.approved.length + r.redirected.length} of ${r.territory.slots} openings used`} />
               </div>
             ))}
           </Card>

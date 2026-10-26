@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useDesk } from "@/lib/desk";
-import { CONFIG } from "@/engine/config";
 import { EmptyState, ImportButton, Loading, PageHeader, ScoreTag, StatusStamp } from "@/components/ui";
 
 export default function Shortlist() {
@@ -31,7 +30,7 @@ export default function Shortlist() {
           const a = ws.applications.find((x) => x.id === s.id)!;
           const d = result.decisions[s.id];
           const t = ws.territories.find((x) => x.id === d.territoryId);
-          const bonus = t ? CONFIG.priorityBonus[t.priority] : 0;
+          const bonus = t ? result.assumptions.priorityBonus[t.priority] : 0;
           return (
             <li key={s.id}>
               <Link href={`/applications/${s.id}`} className="card card-link flex flex-wrap items-center gap-5 p-4 no-underline">

@@ -1,325 +1,223 @@
+import { compareApplicants, explainDecision, executeTool, findApp, getApplication, rerunEngine, type ToolContext, type UpdateArgs } from "@/ai/tools";
 import { run, STATUS_LABEL } from "./run";
-import { applyChange, diff, whatWouldChange, withChange, type Change, type DiffRow } from "./rerun";
-import { stagesFor, trainingPlan } from "./plans";
-import type { Application, Decision, RunInput, RunResult, Status } from "./types";
+import { toRunInput } from "@/lib/workspace";
+import type { DiffCard } from "@/lib/diffcard";
+import type { Application, Status } from "./types";
 
-export interface AssistantContext {
-  input: RunInput;
-  result: RunResult;
-  now: Date;
-}
-
-export interface PendingChange {
+/** What the chat still needs before it can save a change. */
+export interface Pending {
   id: string;
-  change: Change;
-  assumed: string[];
+  changes: Omit<UpdateArgs, "id">;
 }
 
-export interface WhatIf {
-  id: string;
-  change: Change;
-  provisional: boolean;
-  missing: string[];
-  assumed: string[];
-  rows: DiffRow[];
+export interface ChatReply {
+  text: string;
+  cards: DiffCard[];
+  pending?: Pending | null;
 }
-
-export interface Reply {
-  lines: string[];
-  whatIf?: WhatIf;
-  pending?: PendingChange | null;
-  /** The standard wording could not answer; the assistant service may try. */
-  needsAi?: { task: "ask" | "parseChange"; id?: string };
-}
-
-const num = (s: string) => parseFloat(s);
 
 export function findIds(text: string, apps: Application[]): string[] {
   const out: string[] = [];
   const re = /\bapp[-\s]?0*(\d+)\b/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    const n = parseInt(m[1], 10);
-    const hit = apps.find((a) => parseInt(a.id.replace(/\D/g, ""), 10) === n && /app/i.test(a.id)) ?? apps.find((a) => a.id.toLowerCase() === `app-${m![1]}`.toLowerCase());
+    const hit = apps.find((a) => parseInt(a.id.replace(/\D/g, ""), 10) === parseInt(m![1], 10));
     if (hit && !out.includes(hit.id)) out.push(hit.id);
   }
   return out;
 }
 
-export function parseChange(text: string, app: Application | undefined): { change: Change; assumed: string[]; missing: string[] } {
+const num = (s: string) => parseFloat(s);
+
+/** Reads the facts a sentence states. Ownership is only set when it is said. */
+export function parseFields(text: string): Omit<UpdateArgs, "id"> {
   const t = text.toLowerCase();
-  const change: Change = {};
-  const assumed: string[] = [];
-  const missing: string[] = [];
-
-  const ground = /ground[\s-]*floor|\bground\b/.test(t);
-  const upper = /upper|first[\s-]*floor|second[\s-]*floor|1st floor|2nd floor/.test(t);
-  const mall = /\bmall\b/.test(t);
-  if (ground) change.floor = "Ground";
-  else if (mall) change.floor = "Mall unit";
-  else if (upper) change.floor = "Upper";
-
+  const f: Omit<UpdateArgs, "id"> = {};
+  if (/ground[\s-]*floor|\bground\b/.test(t)) f.floor = "Ground";
+  else if (/\bmall\b/.test(t)) f.floor = "Mall unit";
+  else if (/upper|first[\s-]*floor|second[\s-]*floor|1st floor|2nd floor/.test(t)) f.floor = "Upper";
   const sz = t.match(/(\d{2,5})\s*(sq\.?\s*ft|sqft|square\s*feet|sq\.?\s*feet)/);
-  if (sz) change.size = num(sz[1]);
-
-  const owned = /\bown(ed|s)?\b|ownership/.test(t) && !/\bnot own/.test(t);
-  const rented = /\brent(ed|ing|s)?\b|\blease(d)?\b/.test(t);
-  if (owned) change.space = "Owned";
-  else if (rented) change.space = "Rented";
-  if (/\b(no|lost (the|his|her|their)|lost)\b[^.]{0,15}\b(shop|space)\b|\bnot yet (found|identified)\b/.test(t) && !change.space) change.space = "Not yet identified";
-
-  const foundSpace = /(found|got|has|have|secured|signed|finali[sz]ed|booked|identified|arranged)[^.]{0,30}(shop|space|store|unit|premises|showroom|building)|(shop|space)[^.]{0,20}(found|ready|available)/.test(t);
-  if (!change.space && (foundSpace || change.floor || change.size)) {
-    if (app && (app.space === "Owned" || app.space === "Rented")) change.space = app.space;
-    else {
-      change.space = "Rented";
-      assumed.push("rented (you did not say if it is owned or rented)");
-    }
-  }
-
+  if (sz) f.size = num(sz[1]);
+  if (/\bown(ed|s)?\b|ownership|\bpurchased\b|\bbought\b/.test(t) && !/\bnot own/.test(t)) f.space = "Owned";
+  else if (/\brent(ed|ing|s)?\b|\blease(d)?\b/.test(t)) f.space = "Rented";
+  else if (/\bnot yet (found|identified)\b|lost (the|his|her|their) (shop|space)/.test(t)) f.space = "Not yet identified";
   const inv = t.match(/(\d+(\.\d+)?)\s*(lakhs?|lacs?)\b/);
-  if (inv && /invest|capital|budget|fund|raise|increase|afford|put in|can/.test(t)) change.investment = num(inv[1]);
+  if (inv && /invest|capital|budget|fund|raise|increase|afford|put in|can/.test(t)) f.investment = num(inv[1]);
   const exp = t.match(/(\d+(\.\d+)?)\s*(years?|yrs?)\b/);
-  if (exp && /experience|ran|run|worked|managed|retail/.test(t)) change.experience = num(exp[1]);
+  if (exp && /experience|ran|run|worked|managed|retail/.test(t)) f.experience = num(exp[1]);
   const mo = t.match(/(\d+(\.\d+)?)\s*months?\b/);
-  if (mo && /launch|open|target|start|wants/.test(t)) change.target = num(mo[1]);
-  const pin = text.match(/\b(\d{6})\b/);
-  if (pin) change.pin = pin[1];
-  if (/\bkannada\b/.test(t) && /language|train|speak|prefer/.test(t)) change.language = "Kannada";
-  else if (/\bhindi\b/.test(t) && /language|train|speak|prefer/.test(t)) change.language = "Hindi";
-  else if (/\benglish\b/.test(t) && /language|train|speak|prefer/.test(t)) change.language = "English";
-
-  const spaceNow = change.space ?? app?.space;
-  const sizeNow = change.size ?? app?.size ?? null;
-  if ((spaceNow === "Owned" || spaceNow === "Rented") && sizeNow === null) missing.push("the size of the space in sq ft");
-  return { change, assumed, missing };
+  if (mo && /launch|open|target|start|wants/.test(t)) f.target = num(mo[1]);
+  const pin = text.match(/(?<![\d-])(\d{6})(?!\d)/);
+  if (pin) f.pin = pin[1];
+  return f;
 }
 
-const hasFields = (c: Change) => Object.keys(c).length > 0;
+const hasFields = (f: Omit<UpdateArgs, "id">) => Object.values(f).some((v) => v !== undefined);
 
-function fmtStatus(d: Decision | null): string {
-  if (!d) return "New";
-  return d.status === "waiting" && d.position ? `Waiting list, position ${d.position}` : STATUS_LABEL[d.status];
+function lines(...l: (string | null | false | undefined)[]): string {
+  return l.filter((x) => x !== null && x !== false && x !== undefined).join("\n");
 }
 
-function head(d: Decision, name: string): string {
-  return `**${d.id} · ${STATUS_LABEL[d.status]}** (${name || "name not provided"})`;
+function label(s: Status) {
+  return STATUS_LABEL[s];
 }
 
-function listIds(ids: string[], ctx: AssistantContext, max = 12): string {
-  const names = new Map(ctx.input.applications.map((a) => [a.id, a.name]));
-  const shown = ids.slice(0, max).map((id) => `${id} (${names.get(id) || "name not provided"})`);
-  return shown.join(", ") + (ids.length > max ? ` and ${ids.length - max} more` : "");
+function saveReply(ctx: ToolContext, out: unknown, pendingFrom?: { id: string; changes: Omit<UpdateArgs, "id"> }): ChatReply {
+  const o = out as { saved?: boolean; needs_clarification?: string; error?: string; message?: string; already?: boolean };
+  if (o.needs_clarification) return { text: o.needs_clarification, cards: [], pending: pendingFrom ?? null };
+  if (o.error || o.already) return { text: o.message ?? "That did not work. Nothing was saved.", cards: [] };
+  const card = ctx.cards[ctx.cards.length - 1] ?? null;
+  const t = card?.target;
+  const text = lines(
+    `**Saved.** ${card?.summary ?? "The change is saved and everyone was re-checked."}`,
+    t && `- **${t.id}:** ${t.was} → ${t.now}. Score ${t.beforeScore ?? "none"} → ${t.afterScore ?? "none"}. Pin ${t.beforePin ?? "none"} → ${t.afterPin ?? "none"}.`,
+    card && card.knockOn.length > 0 && `- Knock-on effects (${card.knockOn.length}): ${card.knockOn.map((l) => `${l.id} ${l.was} → ${l.now}`).join("; ")}.`,
+    card && card.knockOn.length === 0 && "- Nobody else's result changed.",
+    "You can undo this from the card below.",
+  );
+  return { text, cards: card ? [card] : [] };
 }
 
-function why(id: string, ctx: AssistantContext): Reply {
-  const d = ctx.result.decisions[id];
-  const a = ctx.input.applications.find((x) => x.id === id)!;
-  const lines = [head(d, a.name), d.verdict, ""];
-  lines.push("Because:");
-  for (const r of d.reasons.slice(0, 4)) lines.push(`- ${r}`);
-  if (d.status === "waiting" && d.ahead.length) lines.push(`- Ahead of this applicant: ${d.ahead.join(", ")}.`);
-  if (d.checks.length) {
-    lines.push("", "Things to check:");
-    for (const c of d.checks.slice(0, 4)) lines.push(`- ${c}`);
+function whyText(ctx: ToolContext, id: string): string {
+  const e = explainDecision(ctx, { id }) as Record<string, unknown> & { error?: string; message?: string };
+  if (e.error) return e.message as string;
+  const trail = (e.reasonTrail as { check: string; result: string; detail: string }[]).map((t) => `- ${t.result === "pass" ? "✓" : t.result === "fail" ? "✗" : "•"} ${t.check}: ${t.detail}`);
+  const parts = (e.scoreBreakdown as { part: string; points: number; max: number }[] | null)?.map((p) => `${p.part} ${p.points}/${p.max}`).join(", ");
+  const what = (e.whatWouldChange as string[]) ?? [];
+  return lines(`**${e.id} · ${e.status}**`, `${e.verdict}`, "", "Because (from the stored reason trail):", ...trail, parts && `Score parts: ${parts}.`, what.length > 0 && "", what.length > 0 && "What would change it:", ...what.map((w) => `- ${w}`));
+}
+
+function compareText(ctx: ToolContext, ids: string[], message: string): string {
+  const c = compareApplicants(ctx, { ids }) as { items: Record<string, unknown>[] };
+  const items = c.items as unknown as { id: string; status: string; verdict: string; score: number | null; scoreBreakdown: { part: string; points: number; max: number }[] | null; requestedPin: string; requestedPinHeldBy: unknown; assignedPin: string | null; allocationLines: string[] }[];
+  const out: string[] = [];
+  const notApproved = items.filter((i) => !/^Approved/.test(i.status) && !/Redirected/.test(i.status));
+  if (/approved/i.test(message) && notApproved.length > 0) {
+    out.push(`**One correction first:** ${notApproved.map((i) => `${i.id} is not approved (${i.status.toLowerCase()}, score ${i.score ?? "none"})`).join("; ")}.`, "");
   }
-  lines.push("", `What would change it: ${whatWouldChange(ctx.input, id)}`);
-  return { lines };
-}
-
-function ahead(id: string, ctx: AssistantContext): Reply {
-  const d = ctx.result.decisions[id];
-  const a = ctx.input.applications.find((x) => x.id === id)!;
-  if (d.status !== "waiting") return { lines: [head(d, a.name), `${id} is not on the waiting list, so nobody is ahead. ${d.verdict}`] };
-  const rows = d.ahead.map((x) => {
-    const dd = ctx.result.decisions[x];
-    return `- ${x}: ${fmtStatus(dd)}${dd?.score !== null && dd ? `, score ${dd.score}` : ""}`;
-  });
-  return { lines: [head(d, a.name), `${d.ahead.length} applicant(s) are ahead of ${id} in ${d.territoryId}:`, ...rows, "", `${d.reasons[0]}`] };
-}
-
-function next(id: string, ctx: AssistantContext): Reply {
-  const d = ctx.result.decisions[id];
-  const a = ctx.input.applications.find((x) => x.id === id)!;
-  const lines = [head(d, a.name)];
-  if (d.status === "approved" || d.status === "conditional") {
-    if (d.condition.length) {
-      lines.push("First, the condition:");
-      for (const c of d.condition) lines.push(`- ${c.text}`);
-      lines.push("", "Then, getting ready to open (about 10 weeks):");
-    } else lines.push("Next steps, about 10 weeks to open:");
-    for (const s of stagesFor(d).slice(0, 4)) lines.push(`- ${s.name} (${s.owner})`);
-    lines.push("", "Open the applicant's page to see all stages and update them.");
-  } else if (d.status === "needs_info") lines.push(`Ask the applicant: ${d.ask}`, "They should reply within 7 days.");
-  else if (d.status === "waiting") {
-    lines.push(`Nothing to do yet. They are ${d.position ? `number ${d.position}` : "on"} the waiting list.`);
-    if (d.offers.length) lines.push(`Offer them: ${d.offers.map((o) => `${o.city} (${o.pins.join(", ")})`).join("; ")}.`);
-  } else lines.push(`Nothing to do right now. ${whatWouldChange(ctx.input, id)}`);
-  return { lines };
-}
-
-function training(id: string, ctx: AssistantContext): Reply {
-  const d = ctx.result.decisions[id];
-  const a = ctx.input.applications.find((x) => x.id === id)!;
-  if (d.status !== "approved" && d.status !== "conditional")
-    return { lines: [head(d, a.name), `Training is planned once an applicant is approved. ${id} is ${STATUS_LABEL[d.status].toLowerCase()} right now.`] };
-  const p = trainingPlan(a, d);
-  const lines = [head(d, a.name), `${p.programme}: ${p.duration}, in ${p.language}.`];
-  if (p.focus.length) {
-    lines.push("Extra focus:");
-    for (const f of p.focus) lines.push(`- ${f.module}: ${f.why}`);
+  for (const i of items) {
+    const holder = i.requestedPinHeldBy;
+    const holderText = holder === i.id ? "holds it" : holder && typeof holder === "object" ? `held by ${(holder as { id: string }).id} (score ${(holder as { score: number | null }).score})` : "not held by anyone";
+    out.push(`**${i.id} · ${i.status}** — score ${i.score ?? "none"}; asked for pin ${i.requestedPin}, ${holderText}${i.assignedPin && i.assignedPin !== i.requestedPin ? `; assigned ${i.assignedPin}` : ""}.`);
+    if (i.scoreBreakdown) out.push(`- Parts: ${i.scoreBreakdown.map((p) => `${p.part} ${p.points}/${p.max}`).join(", ")}.`);
+    for (const l of i.allocationLines.slice(0, 3)) out.push(`- ${l}`);
+    out.push("");
   }
-  return { lines };
+  const scored = items.filter((i) => i.score !== null).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  if (scored.length >= 2 && items.some((i) => /Waiting/.test(i.status))) out.push("A higher score does not guarantee an opening: one store per pin code and the number of openings in the area decide who gets a pin. The score decides who goes first for it.");
+  return out.join("\n").trim();
 }
 
-function whatIf(ids: string[], text: string, ctx: AssistantContext, pending: PendingChange | null | undefined, forced?: Change): Reply {
-  const id = ids[0] ?? pending?.id;
-  const app = ctx.input.applications.find((a) => a.id === id);
-  if (!id || !app) return { lines: ["Which applicant? Please include the application number, for example APP-012."] };
-  const parsed = forced ? { change: forced, assumed: [] as string[], missing: [] as string[] } : parseChange(text, app);
-  const change: Change = { ...(pending && pending.id === id ? pending.change : {}), ...parsed.change };
-  const carried = pending && pending.id === id ? pending.assumed.filter((x) => !(parsed.change.space && x.startsWith("rented"))) : [];
-  const assumed = [...new Set([...carried, ...parsed.assumed])];
-  if (!hasFields(change))
-    return { lines: [`I couldn't tell what changed for ${id}. Try: "${id} found a ground-floor shop, 450 sq ft, rented" or "${id} can now invest 30 lakh".`] };
+/** Answers without the language assistant. Same tools, same saves, plain parsing. */
+export async function fallbackChat(message: string, ctx: ToolContext, pending?: Pending | null): Promise<ChatReply> {
+  const q = message.trim();
+  const t = q.toLowerCase();
+  const apps = ctx.ws.applications;
+  if (apps.length === 0) return { text: "There are no applications in this run yet. Import a spreadsheet first, then ask me about any applicant." , cards: [] };
+  const ids = findIds(q, apps);
+  const unknown = /\bapp[-\s]?\d+/i.test(q) && ids.length === 0;
+  if (unknown) return { text: "I couldn't find that application number in this run.", cards: [], pending };
 
-  const sizeNow = change.size ?? app.size ?? null;
-  const spaceNow = change.space ?? app.space;
-  const missing = (spaceNow === "Owned" || spaceNow === "Rented") && sizeNow === null ? ["the size of the space in sq ft"] : [];
-  const provisional = missing.length > 0;
-  const after = run(withChange(ctx.input, id, change, provisional));
-  const names = Object.fromEntries(ctx.input.applications.map((a) => [a.id, a.name]));
-  const rows = diff(ctx.result, after, names, id);
-  const d1 = ctx.result.decisions[id];
-  const d2 = after.decisions[id];
+  if (/(approve|accept|select|pass|promote)[^.]*(anyway|regardless|no matter)|skip (the )?rules|ignore (the )?rules|bypass|force[- ]approve/.test(t)) {
+    return {
+      text: lines("I can't skip the rules. Every opening has to respect one store per pin code and the number of openings in each area.", `If the team has a good reason to decide differently${ids[0] ? ` for ${ids[0]}` : ""}, open the applicant and use **Change this decision**. It asks for a reason and keeps a record.`),
+      cards: [],
+    };
+  }
 
-  const lines: string[] = [];
-  lines.push(`**${id} · ${fmtStatus(d1)} → ${fmtStatus(d2)}**`);
-  const changedWords = Object.entries(change)
-    .map(([k, v]) => `${k === "size" ? "size" : k} ${v}${k === "size" ? " sq ft" : k === "investment" ? " lakh" : ""}`)
-    .join(", ");
-  lines.push(`If ${id} changes: ${changedWords}.`);
-  if (assumed.length) lines.push(`I assumed: ${assumed.join("; ")}.`);
-  if (d1.score !== null && d2.score !== null && d1.score !== d2.score) lines.push(`Score: ${d1.score} → ${d2.score}.`);
-  const unchanged = rows.length === 0 || (rows.length === 1 && rows[0].was === rows[0].now);
-  lines.push("", "Because:");
-  for (const r of d2.reasons.slice(0, 3)) lines.push(`- ${r}`);
-  if (unchanged) lines.push("", "Nobody's result changes.");
-  else {
-    const others = rows.filter((r) => r.id !== id);
-    if (others.length) {
-      lines.push("", `Also affected (${others.length}):`);
-      for (const r of others) lines.push(`- ${r.id} (${r.name || "name not provided"}): ${r.was} → ${r.now}. ${r.why}`);
+  // Answer to a question we asked: it belongs to the same change.
+  if (pending && ids.length === 0) {
+    const f = parseFields(q);
+    const bare = q.match(/^\D*(\d{2,5})\D*$/);
+    if (!f.size && bare) f.size = num(bare[1]);
+    if (hasFields(f)) {
+      const merged = { ...pending.changes, ...f };
+      const out = await executeTool(ctx, "update_application", { id: pending.id, ...merged });
+      return saveReply(ctx, out, { id: pending.id, changes: merged });
     }
   }
-  if (missing.length) {
-    lines.push("", `I still need ${missing.join(" and ")} to make this final. Tell me, for example "${id} space is 450 sq ft". The result above scores the missing size as unknown.`);
-  } else lines.push("", "This is a preview. Nothing is saved until you press Save this change.");
-  return { lines, whatIf: { id, change, provisional, missing, assumed, rows }, pending: missing.length ? { id, change, assumed } : null };
-}
 
-function listBy(status: Status, ctx: AssistantContext, title: string): Reply {
-  const ids = ctx.input.applications.map((a) => a.id).filter((id) => ctx.result.decisions[id]?.status === status);
-  if (!ids.length) return { lines: [`**${title}**`, "Nobody right now."] };
-  const lines = [`**${title}: ${ids.length}**`];
-  for (const id of ids.slice(0, 20)) {
-    const d = ctx.result.decisions[id];
-    const name = ctx.input.applications.find((a) => a.id === id)?.name || "name not provided";
-    lines.push(`- ${id} (${name}): ${status === "needs_info" ? d.ask : d.verdict}`);
-  }
-  return { lines };
-}
-
-export function answer(question: string, ctx: AssistantContext, pending?: PendingChange | null): Reply {
-  const q = question.trim();
-  const t = q.toLowerCase();
-  const apps = ctx.input.applications;
-  if (apps.length === 0) return { lines: ["There are no applications yet. Import a spreadsheet first, then ask me about any applicant."] };
-  const ids = findIds(q, apps);
-  const unknownId = /\bapp[-\s]?\d+/i.test(q) && ids.length === 0;
-  if (unknownId) return { lines: ["I couldn't find that application number in the current list."], pending };
-
-  if (/(approve|accept|select|pass|shortlist|promote)[^.]*(anyway|regardless|no matter)|skip (the )?rules|ignore (the )?rules|bypass|force[- ]approve/.test(t)) {
-    return {
-      lines: [
-        "I can't skip the rules. Every approval has to respect one store per pin code and the number of openings in each area.",
-        ids[0] ? `If the team has a good reason to decide differently for ${ids[0]}, open the applicant and use **Change this decision**. It asks for a reason and keeps a record.` : "If the team has a good reason to decide differently, open the applicant and use **Change this decision**. It asks for a reason and keeps a record.",
-      ],
-    };
+  const territoryRef = q.match(/\bter-?\s?0*(\d+)\b/i);
+  if (territoryRef && /(add|another|extra|more|increase|remove|reduce|fewer|less)\b[^.]*\b(opening|slot)s?|\b(opening|slot)s?\b[^.]*\b(add|more|extra|increase|remove|reduce)/i.test(q)) {
+    const word = /\b(two|2)\b/.test(t) ? 2 : /\b(three|3)\b/.test(t) ? 3 : 1;
+    const delta = /(remove|reduce|fewer|less|take away)/.test(t) ? -word : word;
+    const area = ctx.ws.territories.find((a) => a.id.replace(/\D/g, "").replace(/^0+/, "") === territoryRef[1].replace(/^0+/, ""));
+    if (!area) return { text: `I couldn't find area TER-${territoryRef[1]} in this run.`, cards: [] };
+    return saveReply(ctx, await executeTool(ctx, "update_territory", { id: area.id, slots_delta: delta }));
   }
 
-  const asksQuestion = /^\s*(why|who|how|what|which|when|where|is|are|does|do|did|show|list|tell|explain)\b|\?\s*$/.test(t) && !/\b(what if|suppose)\b/.test(t);
-  const statesNews = /\b(managed to|lease[ds]?|signed|booked|arranged|secured|finali[sz]ed|found|got|bought|moved|changed|updated|raised|increased|now|just|has|have|had|can)\b/.test(t);
-  const isWhatIf =
-    /\b(what if|suppose|if )/.test(t) ||
-    /(now|just|has|have|had) (found|got|secured|signed|raised|increased|bought|moved|changed|owns?|rented)|found a|now (has|have|owns?|can)|increased|raised|changed (his|her|their|the)|updated|moved to|\bis now\b/.test(t) ||
-    (!asksQuestion && statesNews);
-  if (ids.length && isWhatIf) {
-    const parsed = parseChange(q, apps.find((a) => a.id === ids[0]));
-    if (hasFields(parsed.change)) return whatIf(ids, q, ctx, pending);
-    return {
-      needsAi: { task: "parseChange", id: ids[0] },
-      lines: [`I couldn't tell what changed for ${ids[0]}. Try: "${ids[0]} found a ground-floor shop, 450 sq ft, rented" or "${ids[0]} can now invest 30 lakh".`],
-      pending,
-    };
-  }
-  if (!ids.length && pending) {
-    const parsed = parseChange(q, apps.find((a) => a.id === pending.id));
-    if (hasFields(parsed.change)) return whatIf([], q, ctx, pending);
+  if (ids.length && /\b(withdrawn|withdraw|withdraws|withdrew|withdrawing|pulled out|dropped out|no longer interested|backed out)\b/.test(t)) {
+    return saveReply(ctx, await executeTool(ctx, "withdraw_application", { id: ids[0] }));
   }
 
+  const asksQuestion = /^\s*(why|who|how|what|which|when|where|is|are|does|do|did|show|list|tell|explain|compare)\b|\?\s*$/.test(t) && !/\b(what if|suppose)\b/.test(t);
+  if (ids.length === 1 && !asksQuestion) {
+    const f = parseFields(q);
+    const news = /\b(found|got|has|have|now|leased|lease|signed|booked|secured|managed|raised|increased|moved|changed|updated|can)\b/.test(t);
+    const foundShop = /(found|got|secured|signed|leased|booked|arranged)[^.]*\b(shop|space|store|unit|premises)\b/.test(t);
+    if (foundShop && !hasFields(f)) return { text: "Is the shop owned or rented?", cards: [], pending: { id: ids[0], changes: {} } };
+    if (news || hasFields(f)) {
+      const out = await executeTool(ctx, "update_application", { id: ids[0], ...f });
+      return saveReply(ctx, out, { id: ids[0], changes: f });
+    }
+  }
+
+  if (ids.length >= 2 && /(compare|versus|\bvs\b|while|whereas|than|side by side|but)/.test(t)) return { text: compareText(ctx, ids, q), cards: [] };
+  if (ids.length >= 2 && /why/.test(t)) return { text: compareText(ctx, ids, q), cards: [] };
+
+  const result = run(toRunInput(ctx.ws));
   if (ids.length) {
     const id = ids[0];
-    if (/\bahead\b|before (him|her|them)|ranked above|who (is|are) (in front|first)/.test(t)) return ahead(id, ctx);
-    if (/train|learn|course|programme|program\b/.test(t)) return training(id, ctx);
-    if (/next|need to do|what (should|do|does|must)|steps?|todo|to do/.test(t) && !/why/.test(t)) return next(id, ctx);
-    if (/why|reason|explain|how come|because|hold|waiting|rejected|not eligible|approved|status|decision|what happened|score/.test(t)) return why(id, ctx);
-    return why(id, ctx);
+    const d = result.decisions[id];
+    if (/\bahead\b|before (him|her|them)|ranked above/.test(t)) {
+      if (d.status !== "waiting") return { text: `**${id} · ${label(d.status)}**\n${id} is not on the waiting list, so nobody is ahead. ${d.verdict}`, cards: [] };
+      return { text: lines(`**${id} · ${label(d.status)}**`, `${d.ahead.length} applicant(s) are ahead of ${id} in ${d.territoryId}:`, ...d.ahead.map((x) => `- ${x}: ${label(result.decisions[x]?.status ?? "waiting")}, score ${result.decisions[x]?.score ?? "none"}`)), cards: [] };
+    }
+    if (/train|learn|course|programme|program\b/.test(t)) {
+      const info = getApplication(ctx, { id }) as { application?: { preferredLanguage: string; experienceYears: number | null } };
+      return { text: lines(`**${id} · ${label(d.status)}**`, `Training is planned from the retail experience on the application (${info.application?.experienceYears ?? "not provided"} years), in ${info.application?.preferredLanguage ?? "the preferred language"}. Open the applicant's page for the full plan.`), cards: [] };
+    }
+    if (/next|need to do|what (should|do|does|must)|steps?|to do/.test(t) && !/why/.test(t)) return { text: lines(`**${id} · ${label(d.status)}**`, d.nextStep), cards: [] };
+    return { text: whyText(ctx, id), cards: [] };
   }
 
   if (/(shortlist|top (five|5)|start with|start here|which five|first five)/.test(t)) {
-    if (!ctx.result.shortlist.length) return { lines: ["Nobody is approved yet, so there is nothing to start with."] };
-    const lines = ["**Start with these**"];
-    ctx.result.shortlist.forEach((s, i) => {
-      const a = apps.find((x) => x.id === s.id);
-      lines.push(`${i + 1}. ${s.id} (${a?.name || "name not provided"}) — ${a?.city}, value ${s.value}. Score plus a bonus when the area is a priority.`);
-    });
-    return { lines };
+    if (!result.shortlist.length) return { text: "Nobody is approved yet, so there is nothing to start with.", cards: [] };
+    return { text: lines("**Start with these**", ...result.shortlist.map((s, i) => `${i + 1}. ${s.id} — value ${s.value} (score plus a bonus when the area is a priority).`)), cards: [] };
   }
-  if (/\b(full|filled|no openings|fill)\b|which areas|area/.test(t)) {
-    const full = ctx.result.territories.filter((r) => r.territory.slots > 0 && r.openingsLeft === 0);
-    const empty = ctx.result.territories.filter((r) => r.openingsLeft > 0);
-    const lines = ["**Areas**"];
-    lines.push(full.length ? `Full: ${full.map((r) => `${r.territory.id} (${r.territory.city}, ${r.territory.slots}/${r.territory.slots})`).join(", ")}.` : "No area is full.");
-    if (empty.length) lines.push(`Still open: ${empty.map((r) => `${r.territory.id} (${r.openingsLeft} of ${r.territory.slots} left)`).join(", ")}.`);
-    return { lines };
+  if (/\b(full|filled|no openings)\b|which areas|areas/.test(t)) {
+    const full = result.territories.filter((a) => a.territory.slots > 0 && a.openingsLeft === 0);
+    const open = result.territories.filter((a) => a.openingsLeft > 0);
+    return { text: lines("**Areas**", full.length ? `Full: ${full.map((a) => `${a.territory.id} (${a.territory.slots}/${a.territory.slots})`).join(", ")}.` : "No area is full.", open.length ? `Still open: ${open.map((a) => `${a.territory.id} (${a.openingsLeft} of ${a.territory.slots} left)`).join(", ")}.` : ""), cards: [] };
   }
-  if (/needs? info|missing|on hold|\bhold\b|incomplete|blocked/.test(t)) return listBy("needs_info", ctx, "Needs information");
-  if (/waiting|waitlist/.test(t)) return listBy("waiting", ctx, "Waiting list");
-  if (/not eligible|rejected|declined/.test(t)) return listBy("not_eligible", ctx, "Not eligible right now");
-  if (/condition/.test(t)) return listBy("conditional", ctx, "Approved with a condition");
-  if (/approved|who (got|has) (an )?opening/.test(t)) return listBy("approved", ctx, "Approved to proceed");
-  if (/summary|overview|how many|count|status|everyone|all applicants/.test(t)) {
-    const counts = (Object.keys(STATUS_LABEL) as Status[]).map((s) => `${STATUS_LABEL[s]}: ${Object.values(ctx.result.decisions).filter((d) => d.status === s).length}`);
-    return { lines: [`**${apps.length} applications**`, ...counts] };
-  }
-  return {
-    needsAi: { task: "ask" },
-    lines: [
-      "I can answer questions about the decisions already made. Try:",
-      '- "Why is APP-007 on the waiting list?"',
-      '- "Who is ahead of APP-004?"',
-      '- "What does APP-012 need to do next?"',
-      '- "How will APP-009 be trained?"',
-      '- "Which five should we start with?"',
-      '- "Which areas are full?"',
-      '- "Show everyone who needs information"',
-      '- "APP-012 found a ground-floor shop, 400 sq ft, rented"',
-    ],
+  const listFor = (s: Status, title: string): ChatReply => {
+    const ds = Object.values(result.decisions).filter((d) => d.status === s);
+    if (!ds.length) return { text: `**${title}**\nNobody right now.`, cards: [] };
+    return { text: lines(`**${title}: ${ds.length}**`, ...ds.slice(0, 20).map((d) => `- ${d.id}: ${s === "needs_info" ? d.ask : d.verdict}`)), cards: [] };
   };
-}
-
-/** Applies a change that the assistant service read from the team's sentence. */
-export function answerWithChange(id: string, change: Change, ctx: AssistantContext, pending?: PendingChange | null): Reply {
-  return whatIf([id], "", ctx, pending, change);
+  if (/needs? info|missing|on hold|\bhold\b|incomplete|blocked/.test(t)) return listFor("needs_info", "Needs information");
+  if (/waiting|waitlist/.test(t)) return listFor("waiting", "Waiting list");
+  if (/redirect/.test(t)) return listFor("redirected", "Redirected");
+  if (/not in (the )?(current )?plan/.test(t)) return listFor("not_in_plan", "Not in current plan");
+  if (/not eligible|rejected|declined/.test(t)) return listFor("not_eligible", "Not eligible right now");
+  if (/withdrawn/.test(t)) return listFor("withdrawn", "Withdrawn");
+  if (/condition/.test(t)) return listFor("conditional", "Approved with a condition");
+  if (/approved|who (got|has) (an )?opening/.test(t)) return listFor("approved", "Approved to proceed");
+  if (/summary|overview|how many|count|status|everyone|all applicants|rerun|re-run/.test(t)) {
+    const r = rerunEngine(ctx);
+    return { text: lines(`**${r.applications} applications**`, ...Object.entries(r.counts).map(([k, v]) => `- ${k}: ${v}`)), cards: [] };
+  }
+  void findApp;
+  return {
+    text: lines(
+      "I can answer questions about the decisions and save new information. Try:",
+      '- "Why is APP-007 on the waiting list?"',
+      '- "Compare APP-003 and APP-005"',
+      '- "APP-002 has withdrawn"',
+      '- "APP-012 found a 450 sq ft ground-floor rented shop"',
+      '- "Add one opening to TER-03"',
+      '- "Which areas are full?"',
+    ),
+    cards: [],
+  };
 }

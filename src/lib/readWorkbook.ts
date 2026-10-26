@@ -174,11 +174,9 @@ export async function readWorkbook(buffer: Buffer, fileName: string): Promise<Re
   }
 
   let stores: Store[] = [];
-  let storeRows = 0;
   if (storeSheet) {
     const storeRead = sheetRows(storeSheet, "Store ID");
     if (storeRead) {
-      storeRows = storeRead.rows.length;
       for (const { row, raw } of storeRead.rows) {
         const s = cleanStore(raw);
         if (!s.id || !/^\d{6}$/.test(s.pin)) {

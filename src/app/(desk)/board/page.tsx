@@ -3,31 +3,34 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useDesk } from "@/lib/desk";
+import { toRunInput } from "@/lib/workspace";
 import { trainingPlan } from "@/engine/plans";
-import { STATUS_LABEL } from "@/engine/run";
+import { HOLDS_OPENING, STATUS_LABEL } from "@/engine/run";
 import { whatWouldChange } from "@/engine/rerun";
 import type { Status } from "@/engine/types";
 import { Card, EmptyState, ImportButton, Loading, PageHeader, ScoreTag, SectionTitle, StatusStamp } from "@/components/ui";
 
-const ORDER: Status[] = ["approved", "conditional", "waiting", "needs_info", "not_eligible"];
+const ORDER: Status[] = ["approved", "conditional", "redirected", "waiting", "needs_info", "not_in_plan", "not_eligible", "withdrawn"];
+const MARK: Record<string, string> = { pass: "✓", fail: "✗", warn: "!", info: "•" };
+const MARK_COLOR: Record<string, string> = { pass: "#0e6b43", fail: "#b3001b", warn: "#7a4a00", info: "#3b4558" };
+const MARK_WORD: Record<string, string> = { pass: "Passed", fail: "Failed", warn: "Check", info: "Note" };
 
 export default function Board() {
   const { ready, hasData, ws, result } = useDesk();
   const [open, setOpen] = useState<string | null>(null);
 
-  const input = useMemo(() => ({ applications: ws.applications, territories: ws.territories, stores: ws.stores, overrides: ws.overrides }), [ws]);
+  const input = useMemo(() => toRunInput(ws), [ws]);
   const checks = useMemo(() => {
-    const taken = new Map<string, string[]>();
-    for (const a of ws.applications) {
-      const d = result.decisions[a.id];
-      if (d && (d.status === "approved" || d.status === "conditional")) taken.set(a.pin, [...(taken.get(a.pin) ?? []), a.id]);
+    const held = new Map<string, string[]>();
+    for (const d of Object.values(result.decisions)) {
+      if (HOLDS_OPENING.includes(d.status) && !d.changedByTeam && d.assignedPin) held.set(d.assignedPin, [...(held.get(d.assignedPin) ?? []), d.id]);
     }
     const storePins = new Set(ws.stores.map((s) => s.pin));
     return {
-      pinsApproved: taken.size,
-      onePerPin: [...taken.values()].every((v) => v.length === 1),
-      noStorePin: [...taken.keys()].every((p) => !storePins.has(p)),
-      areas: result.territories.map((r) => ({ id: r.territory.id, city: r.territory.city, used: r.approved.length, slots: r.territory.slots, ok: r.approved.length <= r.territory.slots })),
+      pinsHeld: held.size,
+      onePerPin: [...held.values()].every((v) => v.length === 1),
+      noStorePin: [...held.keys()].every((p) => !storePins.has(p)),
+      areas: result.territories.map((r) => ({ id: r.territory.id, city: r.territory.city, used: r.approved.length + r.redirected.length, slots: r.territory.slots, ok: r.approved.length + r.redirected.length <= r.territory.slots })),
     };
   }, [ws, result]);
 
@@ -45,30 +48,21 @@ export default function Board() {
     .map((a) => ({ a, d: result.decisions[a.id] }))
     .filter((r) => r.d)
     .sort((x, y) => ORDER.indexOf(x.d.status) - ORDER.indexOf(y.d.status) || (y.d.score ?? 0) - (x.d.score ?? 0));
-  const counts = ORDER.map((s) => [s, rows.filter((r) => r.d.status === s).length] as const);
+  const counts = ORDER.map((s) => [s, rows.filter((r) => r.d.status === s).length] as const).filter(([, n]) => n > 0);
   const allOk = result.problems.length === 0 && checks.onePerPin && checks.noStorePin && checks.areas.every((x) => x.ok);
-
-  const nextStep = (id: string) => {
-    const d = result.decisions[id];
-    if (d.status === "approved") return "Send ID and address proof, then site visit and financial checks.";
-    if (d.status === "conditional") return d.condition[0]?.text ?? "Meet the condition.";
-    if (d.status === "needs_info") return d.ask ?? "Reply with the missing detail.";
-    if (d.status === "waiting") return d.offers.length ? `Offer: ${d.offers[0].city} (${d.offers[0].pins.slice(0, 2).join(", ")}).` : "Wait for an opening.";
-    return "No action right now.";
-  };
 
   return (
     <>
       <PageHeader title="Decision board" intro={intro} action={<Link className="btn btn-ghost" href="/import">Import another file</Link>} />
 
-      <section className="mb-8 grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+      <section className="mb-8 grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]" aria-label="Rules check">
         <Card className="p-5" selected={allOk}>
           <SectionTitle>Rules check</SectionTitle>
           <ul className="space-y-2">
             {[
-              [checks.onePerPin, `One store per pin code: ${checks.pinsApproved} approved pin codes, none shared.`],
-              [checks.noStorePin, `No approved pin code already has a Kicks store (${ws.stores.length} stores checked).`],
-              [checks.areas.every((x) => x.ok), "No area has more approvals than openings."],
+              [checks.onePerPin, `One store per pin code: ${checks.pinsHeld} pin codes given out, none shared.`],
+              [checks.noStorePin, `No pin code given out already has a Kicks store (${ws.stores.length} stores checked).`],
+              [checks.areas.every((x) => x.ok), "No area has more approvals and redirects than openings."],
               [true, "The same file always gives the same result."],
               [true, "Notes written by applicants are information only. Instructions in them are ignored."],
             ].map(([ok, text], i) => (
@@ -76,6 +70,7 @@ export default function Board() {
                 <span aria-hidden="true" className="font-bold" style={{ color: ok ? "#0e6b43" : "var(--error)" }}>
                   {ok ? "✓" : "!"}
                 </span>
+                <span className="sr-only">{ok ? "Passed:" : "Failed:"}</span>
                 <span>{text as string}</span>
               </li>
             ))}
@@ -99,7 +94,7 @@ export default function Board() {
         </Card>
       </section>
 
-      <div className="mb-6 flex flex-wrap gap-3">
+      <div className="mb-6 flex flex-wrap gap-3" aria-label="Totals by decision">
         {counts.map(([s, n]) => (
           <span key={s} className="flex items-center gap-2">
             <StatusStamp status={s} flat /> <strong className="mono">{n}</strong>
@@ -109,21 +104,22 @@ export default function Board() {
 
       <Card className="overflow-x-auto">
         <table className="desk-table">
+          <caption className="sr-only">Every applicant with their decision, reasons, next step and training</caption>
           <thead>
             <tr>
-              <th>Decision</th>
-              <th>Applicant</th>
-              <th>Why</th>
-              <th>What they do next</th>
-              <th>Training</th>
-              <th>Score</th>
+              <th scope="col">Decision</th>
+              <th scope="col">Applicant</th>
+              <th scope="col">Why</th>
+              <th scope="col">What they do next</th>
+              <th scope="col">Training</th>
+              <th scope="col">Score</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(({ a, d }) => {
               const isOpen = open === a.id;
-              const approved = d.status === "approved" || d.status === "conditional";
-              const tp = approved ? trainingPlan(a, d) : null;
+              const holds = HOLDS_OPENING.includes(d.status);
+              const tp = holds ? trainingPlan(a, d, result.assumptions) : null;
               return (
                 <tr key={a.id} className={`align-top row-${d.status}`}>
                   <td className="whitespace-nowrap">
@@ -137,42 +133,54 @@ export default function Board() {
                     {a.name || "Name not provided"}
                     <br />
                     <span className="text-sm text-muted">
-                      {a.city} · <span className="mono">{a.pin}</span> {d.territoryId ? `· ${d.territoryId}` : ""}
+                      {a.city} · asked <span className="mono">{a.pin || "—"}</span>
+                      {d.assignedPin && d.assignedPin !== a.pin ? (
+                        <>
+                          {" "}
+                          · offered <span className="mono">{d.assignedPin}</span>
+                        </>
+                      ) : null}{" "}
+                      {d.territoryId ? `· ${d.territoryId}` : ""}
                     </span>
                   </td>
-                  <td className="min-w-[260px] max-w-[360px]">
+                  <td className="min-w-[260px] max-w-[380px]">
                     {d.verdict}
                     <br />
-                    <button className="min-h-[44px] font-semibold text-cobalt underline" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : a.id)}>
-                      {isOpen ? "Hide reasons" : "Show reasons"}
+                    <button className="min-h-[44px] font-semibold text-cobalt underline" aria-expanded={isOpen} aria-controls={`trail-${a.id}`} onClick={() => setOpen(isOpen ? null : a.id)}>
+                      {isOpen ? "Hide the checks" : "Show the checks"}
                     </button>
                     {isOpen && (
-                      <div className="mb-2 text-sm">
-                        <ul className="list-disc space-y-1 pl-5">
-                          {d.reasons.map((r, i) => (
-                            <li key={i}>{r}</li>
-                          ))}
-                          {d.checks.map((c, i) => (
-                            <li key={`c${i}`}>Check: {c}</li>
+                      <div id={`trail-${a.id}`} className="mb-2 text-sm">
+                        <ul className="space-y-1">
+                          {d.reasonTrail.map((t, i) => (
+                            <li key={i} className="flex gap-2">
+                              <span aria-hidden="true" className="font-bold" style={{ color: MARK_COLOR[t.result] }}>
+                                {MARK[t.result]}
+                              </span>
+                              <span>
+                                <span className="sr-only">{MARK_WORD[t.result]}: </span>
+                                <strong>{t.check}.</strong> {t.detail}
+                              </span>
+                            </li>
                           ))}
                         </ul>
-                        <p className="mt-2 rounded border-2 border-ink bg-lime/60 p-2">
+                        <p className="mt-2 rounded-lg border border-[#c9d6f2] bg-[#f3f6ff] p-2">
                           <strong>What would change this: </strong>
                           {ws.applications.length <= 300 ? whatWouldChange(input, a.id) : "Open the applicant to see this."}
                         </p>
                       </div>
                     )}
                   </td>
-                  <td className="min-w-[220px] max-w-[300px]">{nextStep(a.id)}</td>
+                  <td className="min-w-[220px] max-w-[300px]">{d.nextStep}</td>
                   <td className="min-w-[180px] max-w-[240px]">
                     {tp ? (
                       <>
-                        {tp.duration}, in {tp.language}
+                        {tp.days} days ({tp.hours} hours), in {tp.language}
                         <br />
                         <span className="text-sm text-muted">{tp.focus[0]?.module ? `Focus: ${tp.focus.slice(0, 2).map((f) => f.module).join(", ")}` : "Kicks modules"}</span>
                       </>
                     ) : (
-                      <span className="text-muted">After approval</span>
+                      <span className="text-muted">After an opening is given</span>
                     )}
                   </td>
                   <td>
@@ -185,7 +193,7 @@ export default function Board() {
         </table>
       </Card>
       <p className="mt-4 text-sm text-muted">
-        Want to see what happens when something changes? Use <strong>Ask assistant</strong>, for example “APP-012 found a ground-floor shop, 450 sq ft, rented”.
+        Want to see what happens when something changes? Use <strong>Ask assistant</strong>, for example &ldquo;APP-002 has withdrawn&rdquo;.
       </p>
       <p className="sr-only">{STATUS_LABEL.approved}</p>
     </>

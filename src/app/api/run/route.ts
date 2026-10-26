@@ -5,6 +5,7 @@ import { readRunId, setRunId } from "@/lib/runCookie";
 import { readWorkbook } from "@/lib/readWorkbook";
 import { allow, clientKey } from "@/lib/rateLimit";
 import { actorOf } from "@/lib/actor";
+import { computeHints } from "@/ai/hints";
 import { emptyWorkspace, normaliseWorkspace, type Workspace } from "@/lib/workspace";
 import type { Trigger } from "@/lib/diffcard";
 
@@ -59,7 +60,7 @@ export async function PUT(req: Request) {
   const { data, rev, meta } = parsed.data;
   const actor = actorOf(req);
   try {
-    let id = await readRunId();
+    const id = await readRunId();
     if (!id || !(await loadRun(id))) {
       // First save from this browser: create the run.
       const made = await createRun(normaliseWorkspace(data as unknown as Partial<Workspace>), { actor, summary: "Started a workspace." });
@@ -132,6 +133,7 @@ export async function POST(req: Request) {
       stores: read.stores,
       report: read.report.messages,
       health: read.health,
+      hints: await computeHints(read.applications).catch(() => ({})),
     };
     const currentId = mode === "add" ? await readRunId() : null;
     const current = currentId ? await loadRun(currentId) : null;
@@ -139,7 +141,7 @@ export async function POST(req: Request) {
       const byId = new Map(current.data.applications.map((a) => [a.id, a]));
       for (const a of fresh.applications) if (!byId.has(a.id)) byId.set(a.id, a);
       const territories = [...current.data.territories, ...fresh.territories.filter((t) => !current.data.territories.some((x) => x.id === t.id))];
-      const merged: Workspace = { ...current.data, fileName, applications: [...byId.values()], territories, report: fresh.report, health: fresh.health };
+      const merged: Workspace = { ...current.data, fileName, applications: [...byId.values()], territories, report: fresh.report, health: fresh.health, hints: { ...current.data.hints, ...fresh.hints } };
       const res = await saveRun(currentId, merged, current.rev, { trigger: "import", actor, summary });
       if (!res.ok) return NextResponse.json({ ok: false, error: "A teammate changed the workspace at the same moment. Please try again." }, { status: 409 });
       return NextResponse.json({ ok: true, id: currentId, rev: res.rev, health: read.health, report: read.report });

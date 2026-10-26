@@ -36,14 +36,14 @@ export default function Market() {
         openings: terrs.reduce((n, t) => n + t.territory.slots, 0),
         left: terrs.reduce((n, t) => n + t.openingsLeft, 0),
         applicants: apps.length,
-        approved: decisions.filter((d) => d.status === "approved" || d.status === "conditional").length,
+        approved: decisions.filter((d) => d.status === "approved" || d.status === "conditional" || d.status === "redirected").length,
         waiting: decisions.filter((d) => d.status === "waiting").length,
         space: apps.length ? Math.round((withSpace / apps.length) * 100) : null,
         avgScore: scored.length ? Math.round(scored.reduce((n, d) => n + (d.score ?? 0), 0) / scored.length) : null,
         avgInvest: invested.length ? Math.round((invested.reduce((n, a) => n + (a.investment ?? 0), 0) / invested.length) * 10) / 10 : null,
         free: terrs.reduce((n, t) => n + t.freePins.length, 0),
-        rented: Math.round(earnBackMonths(tier, "Rented")),
-        owned: Math.round(earnBackMonths(tier, "Owned")),
+        rented: Math.round(earnBackMonths(tier, "Rented", result.assumptions)),
+        owned: Math.round(earnBackMonths(tier, "Owned", result.assumptions)),
       };
     });
   }, [ws, result]);
@@ -84,7 +84,7 @@ export default function Market() {
         }
       />
 
-      <div className="mb-8 grid gap-6 md:grid-cols-2">
+      <div className="mb-8 grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">
         <Card className="p-5">
           <SectionTitle>Where we need more partners</SectionTitle>
           {gaps.length === 0 ? (
@@ -118,18 +118,19 @@ export default function Market() {
       <SectionTitle>City by city</SectionTitle>
       <Card className="mb-3 overflow-x-auto">
         <table className="desk-table">
+          <caption className="sr-only">Each city: stores, openings, applicants and readiness</caption>
           <thead>
             <tr>
-              <th>City</th>
-              <th>Stores</th>
-              <th>Openings (left)</th>
-              <th>Applicants</th>
-              <th>Approved</th>
-              <th>With a shop space</th>
-              <th>Average score</th>
-              <th>Average investment</th>
-              <th>Free pin codes</th>
-              <th>Months to earn back</th>
+              <th scope="col">City</th>
+              <th scope="col">Stores</th>
+              <th scope="col">Openings (left)</th>
+              <th scope="col">Applicants</th>
+              <th scope="col">Given an opening</th>
+              <th scope="col">With a shop space</th>
+              <th scope="col">Average score</th>
+              <th scope="col">Average investment</th>
+              <th scope="col">Free pin codes</th>
+              <th scope="col">Months to earn back</th>
             </tr>
           </thead>
           <tbody>
@@ -160,7 +161,7 @@ export default function Market() {
 
       <SectionTitle>Live market notes</SectionTitle>
       <p className="mb-4 max-w-2xl text-muted">Recent web coverage on footwear demand, shop rents and competition in each city, with the sources. Notes are a starting point for the team, not a rule: they never change a decision.</p>
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-2">
         {cities.map((c) => {
           const n = notes[c.city];
           const loaded: Notes | null = n && n !== "loading" ? n : null;
