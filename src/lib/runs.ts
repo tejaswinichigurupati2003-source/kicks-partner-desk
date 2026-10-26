@@ -156,7 +156,7 @@ async function writeEvents(id: string, before: Workspace | null, after: Workspac
   const card = buildDiffCard(beforeRun, afterRun, names, meta.targetId ?? null, { trigger: meta.trigger, summary: meta.summary, groupId, undoable });
   const rows = before ? [...(card.target ? [card.target] : []), ...card.knockOn] : [];
   const patch = before ? makePatch(before, after) : null;
-  const always = ["import", "chat", "assumption", "override", "undo", "territory"].includes(meta.trigger);
+  const always = ["import", "chat", "assumption", "override", "undo", "territory", "note"].includes(meta.trigger);
   if (rows.length === 0 && !always) return { groupId: null, card: null };
   const header = {
     application_id: null as string | null,

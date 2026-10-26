@@ -42,6 +42,7 @@ export interface Desk {
   setOverride: (id: string, status: Status, reason: string) => Promise<DiffCard | null>;
   clearOverride: (id: string) => Promise<DiffCard | null>;
   setStage: (id: string, stage: string, status: StageStatus) => void;
+  setTeamNote: (id: string, note: string) => Promise<DiffCard | null>;
   setStages: (id: string, stages: Record<string, StageStatus>, summary: string) => void;
   toggleChecklist: (id: string, key: string, done: boolean) => void;
   setAssumptions: (next: Partial<Assumptions>, summary: string) => Promise<DiffCard | null>;
@@ -289,6 +290,8 @@ export function DeskProvider({ children }: { children: ReactNode }) {
         },
         { trigger: "override", summary: `Team decision for ${id} removed. The rules decide again.`, targetId: id },
       ),
+    setTeamNote: (id, note) =>
+      mutate((w) => ({ ...w, applications: w.applications.map((a) => (a.id === id ? { ...a, teamNote: note.trim() || undefined } : a)) }), { trigger: "note", summary: note.trim() ? `Note added for ${id}: ${note.trim().slice(0, 120)}` : `Note removed for ${id}.`, targetId: id }),
     setStage: (id, stage, status) => void mutate((w) => ({ ...w, stages: { ...w.stages, [id]: { ...(w.stages[id] ?? {}), [stage]: status } } }), { trigger: "stage", summary: `${id}: ${stage} marked ${status}.` }),
     setStages: (id, stages, summary) => void mutate((w) => ({ ...w, stages: { ...w.stages, [id]: { ...(w.stages[id] ?? {}), ...stages } } }), { trigger: "stage", summary }),
     toggleChecklist: (id, key, done) => void mutate((w) => ({ ...w, checklist: { ...w.checklist, [id]: { ...(w.checklist[id] ?? {}), [key]: done } } }), { trigger: "stage", summary: `${id}: checklist updated.` }),

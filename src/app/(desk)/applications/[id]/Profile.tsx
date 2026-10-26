@@ -11,7 +11,8 @@ import type { DiffCard } from "@/lib/diffcard";
 import { STAGE_STATUSES, buildTimeline, partnerChecklist, stageWindow, stagesFor, trainingPlan, type StageKey, type StageStatus } from "@/engine/plans";
 import { scenariosFor } from "@/engine/rerun";
 import { STATUS_LABEL } from "@/engine/run";
-import type { Status, TrailItem } from "@/engine/types";
+import type { Application, Status, TrailItem } from "@/engine/types";
+import { TEAM_NOTE_MAX } from "@/engine/messages";
 import { Card, EmptyState, Loading, PART_LABEL, ScoreBreakdown, ScoreTag, StatusStamp } from "@/components/ui";
 import { MessagePanel } from "@/components/MessagePanel";
 import { DiffCardView } from "@/components/DiffCardView";
@@ -101,6 +102,49 @@ function History({ id, refreshKey }: { id: string; refreshKey: string }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+const NOTE_IDEAS = ["Please call after 5 pm.", "We spoke on the phone and are glad to proceed.", "Please bring the shop's property papers to the site visit.", "Thank you for your patience while we reviewed your file."];
+
+/** Where the evaluator writes something specific to this applicant. It goes into the message, never into the decision. */
+function TeamNote({ app }: { app: Application }) {
+  const { setTeamNote } = useDesk();
+  const saved = app.teamNote ?? "";
+  const [text, setText] = useState(saved);
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  useEffect(() => setText(saved), [saved, app.id]);
+  const dirty = text.trim() !== saved.trim();
+  const save = async () => {
+    setState("saving");
+    await setTeamNote(app.id, text);
+    setState("saved");
+    setTimeout(() => setState("idle"), 2000);
+  };
+  return (
+    <div className="mb-5 rounded-xl border border-soft-line bg-[#f7faff] p-4">
+      <label htmlFor="team-note" className="font-bold">
+        Your note for {app.name || app.id}
+      </label>
+      <p className="mb-2 text-sm text-muted">Anything specific you want this applicant to read. It is added to the end of the message in all three languages, exactly as you write it. It never changes the decision.</p>
+      <textarea id="team-note" className="field min-h-[84px]" maxLength={TEAM_NOTE_MAX} value={text} onChange={(e) => setText(e.target.value)} placeholder="For example: We spoke on the phone. Please call after 5 pm." />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {NOTE_IDEAS.map((n) => (
+          <button key={n} type="button" className="rounded-full border border-[#cdd6e6] bg-white px-3 py-1 text-xs font-semibold hover:bg-[#eef3ff]" onClick={() => setText((t) => (t.trim() ? t.trim() + " " + n : n).slice(0, TEAM_NOTE_MAX))}>
+            + {n}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button className="btn btn-small" disabled={!dirty || state === "saving"} onClick={save}>
+          {state === "saving" ? "Saving…" : saved && !text.trim() ? "Remove note" : "Save note"}
+        </button>
+        {state === "saved" && <span className="text-sm font-semibold text-[#0e6b43]">Saved. The messages below now include it.</span>}
+        <span className="ml-auto text-xs text-muted">
+          {text.length} / {TEAM_NOTE_MAX}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -209,6 +253,42 @@ export function ApplicantProfile({ id }: { id: string }) {
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
         <div className="space-y-6">
+          <section aria-labelledby="message">
+            <h2 id="message" className="font-display-up mb-3 text-[18px] leading-tight">
+              Message to the applicant
+            </h2>
+            <Card className="p-5">
+              <TeamNote app={app} />
+              <MessagePanel app={app} decision={d} link={links[id]} now={now} assumptions={asm} />
+              {links[id] && (
+                <div className="mt-5 border-t border-soft-line pt-4">
+                  <p className="font-bold">Private status page</p>
+                  <p className="text-sm text-muted">Shows only this applicant&apos;s own information, always up to date. No sign-in needed.</p>
+                  <p className="mono mt-1 break-all text-sm">{links[id]}</p>
+                  <div className="mt-2 flex flex-wrap gap-3">
+                    <a className="btn btn-ghost btn-small" href={links[id]} target="_blank" rel="noreferrer">
+                      Open it
+                    </a>
+                    <button
+                      className="btn btn-ghost btn-small"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(links[id]);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1800);
+                        } catch {
+                          window.prompt("Copy this link:", links[id]);
+                        }
+                      }}
+                    >
+                      {copied ? "Copied" : "Copy link"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          </section>
+
           <section aria-labelledby="trail">
             <h2 id="trail" className="font-display-up mb-3 text-[18px] leading-tight">
               Why: every check, in order
@@ -469,40 +549,6 @@ export function ApplicantProfile({ id }: { id: string }) {
             </section>
           )}
 
-          <section aria-labelledby="message">
-            <h2 id="message" className="font-display-up mb-3 text-[18px] leading-tight">
-              Message to the applicant
-            </h2>
-            <Card className="p-5">
-              <MessagePanel app={app} decision={d} link={links[id]} now={now} assumptions={asm} />
-              {links[id] && (
-                <div className="mt-5 border-t border-soft-line pt-4">
-                  <p className="font-bold">Private status page</p>
-                  <p className="text-sm text-muted">Shows only this applicant&apos;s own information, always up to date. No sign-in needed.</p>
-                  <p className="mono mt-1 break-all text-sm">{links[id]}</p>
-                  <div className="mt-2 flex flex-wrap gap-3">
-                    <a className="btn btn-ghost btn-small" href={links[id]} target="_blank" rel="noreferrer">
-                      Open it
-                    </a>
-                    <button
-                      className="btn btn-ghost btn-small"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(links[id]);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 1800);
-                        } catch {
-                          window.prompt("Copy this link:", links[id]);
-                        }
-                      }}
-                    >
-                      {copied ? "Copied" : "Copy link"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </Card>
-          </section>
         </div>
 
         <aside className="space-y-6">

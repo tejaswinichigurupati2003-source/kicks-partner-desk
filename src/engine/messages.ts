@@ -115,8 +115,20 @@ function conditionLine(d: Decision, lang: Language): string {
     .join("; ");
 }
 
-/** Standard message in the applicant's language. Greets by name, no scores, no other applicants. */
+const NOTE_LEAD: Record<Language, string> = { English: "A note from our team", Kannada: "ನಮ್ಮ ತಂಡದಿಂದ ಒಂದು ಟಿಪ್ಪಣಿ", Hindi: "हमारी टीम की ओर से एक नोट" };
+export const TEAM_NOTE_MAX = 300;
+
+/** The standard message, plus the evaluator's own note for this applicant when there is one. */
 export function buildMessage(a: Application, d: Decision, lang: Language, facts: MessageFacts): string {
+  const text = standardMessage(a, d, lang, facts);
+  const note = (a.teamNote ?? "").replace(/\s+/g, " ").trim().slice(0, TEAM_NOTE_MAX);
+  return note ? `${text}
+
+${NOTE_LEAD[lang]}: ${note}` : text;
+}
+
+/** Standard message in the applicant's language. Greets by name, no scores, no other applicants. */
+function standardMessage(a: Application, d: Decision, lang: Language, facts: MessageFacts): string {
   const { link, now } = facts;
   const asm = facts.assumptions ?? DEFAULT_ASSUMPTIONS;
   const name = a.name || (lang === "English" ? "there" : "");

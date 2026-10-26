@@ -16,7 +16,7 @@ export const maxDuration = 60;
 const MAX_BYTES = 4 * 1024 * 1024;
 
 const Meta = z.object({
-  trigger: z.enum(["import", "chat", "assumption", "override", "edit", "undo", "stage", "territory"]).default("edit"),
+  trigger: z.enum(["import", "chat", "assumption", "override", "edit", "undo", "stage", "territory", "note"]).default("edit"),
   summary: z.string().max(300).default("Changed by the team."),
   targetId: z.string().max(40).nullable().optional(),
 });

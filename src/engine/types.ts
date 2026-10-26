@@ -39,6 +39,8 @@ export interface Application {
   row?: number;
   withdrawn?: boolean;
   withdrawnReason?: string;
+  /** Written by the evaluator when reviewing this applicant. It is added to the message and never affects a decision. */
+  teamNote?: string;
   /** Set only on a what-if copy: a space was found but its size is not known yet. */
   provisionalSize?: boolean;
 }

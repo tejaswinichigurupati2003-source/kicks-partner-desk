@@ -1,7 +1,7 @@
 import { diff, type DiffRow } from "@/engine/rerun";
 import type { RunResult } from "@/engine/types";
 
-export type Trigger = "import" | "chat" | "assumption" | "override" | "edit" | "undo" | "stage" | "territory";
+export type Trigger = "import" | "chat" | "assumption" | "override" | "edit" | "undo" | "stage" | "territory" | "note";
 
 export interface CardLine {
   id: string;

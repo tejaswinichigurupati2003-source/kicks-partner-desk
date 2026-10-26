@@ -41,6 +41,7 @@ const TRIGGERS: { value: string; label: string; tone: string }[] = [
   { value: "edit", label: "Edit", tone: "waiting" },
   { value: "territory", label: "Territory change", tone: "waiting" },
   { value: "stage", label: "Stage update", tone: "needs_info" },
+  { value: "note", label: "Note for applicant", tone: "redirected" },
 ];
 const triggerInfo = (t: string) => TRIGGERS.find((x) => x.value === t) ?? { value: t, label: t, tone: "needs_info" };
 
