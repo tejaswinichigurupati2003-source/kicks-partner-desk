@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Wordmark } from "@/components/ui";
-import { dbEnabled, loadRun, resolveToken } from "@/lib/runs";
+import { dbEnabled, listReplies, loadRun, resolveToken } from "@/lib/runs";
+import { ReplyForm } from "./ReplyForm";
 import { mergeAssumptions } from "@/engine/config";
 import { buildMessage } from "@/engine/messages";
 import { buildTimeline } from "@/engine/plans";
@@ -40,6 +41,8 @@ export default async function StatusPage({ params }: { params: Promise<{ token: 
   const timeline = holds ? buildTimeline(app, d, now, asm) : null;
   const stageState = (key: string) => stored.data.stages[app.id]?.[key] ?? "Not started";
   const message = buildMessage(app, d, app.language, { now, link: "", assumptions: asm }).replace(/\n[^\n]*$/, "");
+  const canReply = d.status === "needs_info" || d.status === "conditional" || d.status === "redirected";
+  const sent = canReply ? await listReplies(found.runId, { applicationId: app.id, includeHandled: true, limit: 3 }).catch(() => []) : [];
   const lang = app.language === "Kannada" ? "kn" : app.language === "Hindi" ? "hi" : "en";
 
   return (
@@ -72,6 +75,14 @@ export default async function StatusPage({ params }: { params: Promise<{ token: 
             ))}
           </ul>
         </section>
+      )}
+
+      {canReply && (
+        <ReplyForm
+          token={token}
+          question={d.status === "needs_info" ? (d.ask ?? d.nextStep) : "Have something to tell our team about this? Write it here and they will see it."}
+          sent={sent.map((r) => ({ at: r.at, body: r.body }))}
+        />
       )}
 
       {timeline && (

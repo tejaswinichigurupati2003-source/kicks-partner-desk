@@ -89,7 +89,17 @@ export function ensureSchema(): Promise<void> {
         created_at timestamptz NOT NULL DEFAULT now(),
         UNIQUE (run_id, application_id)
       )`;
-      for (const t of ["runs", "applications", "territories", "existing_stores", "decisions", "decision_events", "chat_messages", "status_links"]) {
+      await sql`CREATE TABLE IF NOT EXISTS applicant_replies (
+        id bigserial PRIMARY KEY,
+        run_id uuid NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+        application_id text NOT NULL,
+        body text NOT NULL,
+        question text,
+        handled boolean NOT NULL DEFAULT false,
+        at timestamptz NOT NULL DEFAULT now()
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS applicant_replies_run ON applicant_replies (run_id, handled, at DESC)`;
+      for (const t of ["runs", "applications", "territories", "existing_stores", "decisions", "decision_events", "chat_messages", "status_links", "applicant_replies"]) {
         await sql.query(`ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY`);
       }
       await sql`INSERT INTO existing_stores (store_id, city, pin, opened_year)
@@ -318,6 +328,41 @@ export async function listRuns(limit = 50): Promise<RunSummary[]> {
     lastChange: (r.last_change as string | null) ?? null,
     expiresAt: new Date(new Date(r.updated_at as string).getTime() + 7 * 86400_000).toISOString(),
   }));
+}
+
+export interface ReplyRow {
+  id: number;
+  applicationId: string;
+  body: string;
+  question: string | null;
+  handled: boolean;
+  at: string;
+}
+
+const MAX_OPEN_REPLIES = 10;
+
+/** An applicant's answer, kept apart from the decision. It never changes anything by itself: the team reads it and decides. Returns false when this applicant already has too many unread. */
+export async function addReply(runId: string, applicationId: string, body: string, question: string | null): Promise<boolean> {
+  await ensureSchema();
+  const sql = q();
+  const open = await sql`SELECT count(*)::int AS n FROM applicant_replies WHERE run_id = ${runId}::uuid AND application_id = ${applicationId} AND handled = false`;
+  if (Number(open[0]?.n ?? 0) >= MAX_OPEN_REPLIES) return false;
+  await sql`INSERT INTO applicant_replies (run_id, application_id, body, question) VALUES (${runId}::uuid, ${applicationId}, ${body}, ${question})`;
+  return true;
+}
+
+export async function listReplies(runId: string, opts: { applicationId?: string; includeHandled?: boolean; limit?: number } = {}): Promise<ReplyRow[]> {
+  await ensureSchema();
+  const rows = await q()`SELECT id, application_id, body, question, handled, at FROM applicant_replies
+    WHERE run_id = ${runId}::uuid AND (${opts.applicationId ?? null}::text IS NULL OR application_id = ${opts.applicationId ?? null}) AND (${opts.includeHandled ?? false} OR handled = false)
+    ORDER BY at DESC LIMIT ${opts.limit ?? 50}`;
+  return rows.map((r) => ({ id: Number(r.id), applicationId: r.application_id as string, body: r.body as string, question: (r.question as string | null) ?? null, handled: !!r.handled, at: new Date(r.at as string).toISOString() }));
+}
+
+export async function markReplyHandled(runId: string, id: number): Promise<boolean> {
+  await ensureSchema();
+  const rows = await q()`UPDATE applicant_replies SET handled = true WHERE id = ${id} AND run_id = ${runId}::uuid RETURNING id`;
+  return rows.length > 0;
 }
 
 export async function purgeOld(): Promise<number> {

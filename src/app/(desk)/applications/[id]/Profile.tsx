@@ -148,6 +148,65 @@ function TeamNote({ app }: { app: Application }) {
   );
 }
 
+interface ReplyItem {
+  id: number;
+  body: string;
+  question: string | null;
+  at: string;
+}
+
+/** What the applicant wrote on their status page. It never changes the decision; the team confirms any new fact. */
+function Replies({ id }: { id: string }) {
+  const { runId } = useDesk();
+  const [items, setItems] = useState<ReplyItem[]>([]);
+  useEffect(() => {
+    if (!runId) return;
+    let live = true;
+    const load = () =>
+      fetch("/api/run/replies?application=" + encodeURIComponent(id), { cache: "no-store" })
+        .then((r) => r.json())
+        .then((j: { ok: boolean; replies?: ReplyItem[] }) => live && setItems(j.replies ?? []))
+        .catch(() => undefined);
+    void load();
+    const t = setInterval(load, 20_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [runId, id]);
+  if (items.length === 0) return null;
+  const done = async (rid: number) => {
+    setItems((x) => x.filter((r) => r.id !== rid));
+    await fetch("/api/run/replies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: rid }) }).catch(() => undefined);
+  };
+  return (
+    <section aria-labelledby="replies">
+      <h2 id="replies" className="font-display-up mb-3 text-[18px] leading-tight">
+        Reply from the applicant
+      </h2>
+      <Card className="border-[#f4d9a0] bg-[#fffaf0] p-5">
+        <ul className="space-y-3">
+          {items.map((r) => (
+            <li key={r.id} className="rounded-xl border border-soft-line bg-white p-3">
+              {r.question && <p className="text-xs text-muted">In answer to: {r.question}</p>}
+              <p className="mt-1" style={{ overflowWrap: "anywhere" }}>
+                {r.body}
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <span className="text-xs text-muted">{new Date(r.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+                <button className="btn btn-ghost btn-small" onClick={() => done(r.id)}>
+                  Mark as handled
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 text-xs text-muted">Nothing here changes the decision. Once you have confirmed a new fact, tell the assistant, for example: APP-012 found a 450 sq ft rented shop.</p>
+      </Card>
+    </section>
+  );
+}
+
 export function ApplicantProfile({ id }: { id: string }) {
   const desk = useDesk();
   const { ready, ws, result, now, runId } = desk;
@@ -253,6 +312,8 @@ export function ApplicantProfile({ id }: { id: string }) {
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_1fr]">
         <div className="space-y-6">
+          <Replies id={id} />
+
           <section aria-labelledby="message">
             <h2 id="message" className="font-display-up mb-3 text-[18px] leading-tight">
               Message to the applicant
