@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { STATUS_LABEL } from "@/engine/run";
 import { DEFAULT_ASSUMPTIONS } from "@/engine/config";
 import type { Status, ScoreParts } from "@/engine/types";
@@ -79,11 +79,48 @@ export function EmptyState({ title, text, action }: { title: string; text: strin
   );
 }
 
+interface LatestRun {
+  id: string;
+  fileName: string | null;
+  applications: number;
+  updatedAt: string;
+}
+
+/** The most recent run that has applications in it, so an empty screen can jump straight to data. */
+function LatestRunButton() {
+  const [run, setRun] = useState<LatestRun | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/run/history", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: { ok: boolean; runs?: LatestRun[] }) => {
+        if (live && j.ok) setRun((j.runs ?? []).find((r) => r.applications > 0) ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!run) return null;
+  const when = new Date(run.updatedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return (
+    <a className="btn btn-ghost flex-col !items-start !gap-0 text-left no-underline" href={"/run/" + run.id}>
+      <span>Open the latest run</span>
+      <span className="text-xs font-normal text-muted">
+        {run.fileName ?? "Run"} · {run.applications} applications · {when}
+      </span>
+    </a>
+  );
+}
+
 export function ImportButton({ label = "Import applications" }: { label?: string }) {
   return (
-    <Link className="btn" href="/import">
-      {label}
-    </Link>
+    <div className="flex flex-wrap items-center justify-center gap-3">
+      <Link className="btn" href="/import">
+        {label}
+      </Link>
+      <LatestRunButton />
+    </div>
   );
 }
 
