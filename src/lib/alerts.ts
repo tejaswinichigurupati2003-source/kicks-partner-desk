@@ -21,20 +21,25 @@ export function useAlerts(): { alerts: Alert[]; unread: Alert[]; isUnread: (a: A
   const conditionDays = result.assumptions.conditionDays;
   const [read, setRead] = useState<string[]>([]);
   const { runId } = useDesk();
-  const [replies, setReplies] = useState<{ applicationId: string }[]>([]);
+  const [replies, setReplies] = useState<{ id: number; applicationId: string; body: string }[]>([]);
   useEffect(() => {
     if (!runId) return;
     let live = true;
     const load = () =>
       fetch("/api/run/replies", { cache: "no-store" })
         .then((r) => r.json())
-        .then((j: { replies?: { applicationId: string }[] }) => live && setReplies(j.replies ?? []))
+        .then((j: { replies?: { id: number; applicationId: string; body: string }[] }) => live && setReplies(j.replies ?? []))
         .catch(() => undefined);
     void load();
-    const t = setInterval(load, 30_000);
+    const t = setInterval(load, 8_000);
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
     return () => {
       live = false;
       clearInterval(t);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
   }, [runId]);
 
@@ -67,8 +72,10 @@ export function useAlerts(): { alerts: Alert[]; unread: Alert[]; isUnread: (a: A
     }
     const list: Alert[] = [];
     if (replies.length) {
-      const ids = Array.from(new Set(replies.map((r) => r.applicationId)));
-      list.push({ key: "replies:" + replies.length + ":" + ids.join(","), tone: "redirected", title: "Applicant replies", text: replies.length + " new answer(s) from " + ids.join(", ") + ".", href: "/applications/" + ids[0] });
+      const newest = replies[0];
+      const who = ws.applications.find((a) => a.id === newest.applicationId)?.name || newest.applicationId;
+      const snippet = newest.body.length > 70 ? newest.body.slice(0, 67) + "..." : newest.body;
+      list.push({ key: "replies:" + Math.max(...replies.map((r) => r.id)), tone: "redirected", title: replies.length > 1 ? "Applicant replies (" + replies.length + ")" : "Applicant replied", text: who + " (" + newest.applicationId + "): " + snippet, href: "/applications/" + newest.applicationId });
     }
     const n = (s: Status) => count(s);
     if (n("needs_info")) list.push({ key: `needs_info:${n("needs_info")}`, tone: "needs_info", title: "Needs a reply", text: `${n("needs_info")} application(s) are waiting on an answer from the applicant.`, href: "/applications?status=needs_info" });
@@ -78,7 +85,7 @@ export function useAlerts(): { alerts: Alert[]; unread: Alert[]; isUnread: (a: A
     if (n("waiting")) list.push({ key: `waiting:${n("waiting")}`, tone: "waiting", title: "Waiting list", text: `${n("waiting")} applicant(s) are waiting for an opening.`, href: "/applications?status=waiting" });
     if (thin.length) list.push({ key: `thin:${thin.map((t) => t.territory.id).join(",")}`, tone: "approved", title: "Need more applicants", text: `${thin.length} area(s) have fewer applicants than openings: ${thin.map((t) => t.territory.id).join(", ")}.`, href: "/market" });
     return list;
-  }, [hasData, result, ws.approvedOn, ws.stages, now, conditionDays, replies]);
+  }, [hasData, result, ws.approvedOn, ws.stages, ws.applications, now, conditionDays, replies]);
 
   const isUnread = useCallback((a: Alert) => !read.includes(a.key), [read]);
   const markRead = useCallback((keys: string[]) => {
